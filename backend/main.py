@@ -10,7 +10,8 @@ except ImportError:
     SAM = None # Fallback or handle error
     print("Warning: SAM not available in ultralytics.")
 
-from shapely.geometry import Polygon as ShapelyPolygon, MultiPolygon, LineString
+from shapely.geometry import Polygon as ShapelyPolygon, MultiPolygon, LineString, GeometryCollection
+from shapely.ops import split
 from shapely.validation import make_valid
 
 
@@ -621,8 +622,9 @@ async def segment_box(
                     print(f"DEBUG: Validation Passed. Found {len(val_results[0].boxes)} {text_prompt}(s)")
                 
                 if not found:
-                    print(f"DEBUG: Validation Failed. No '{text_prompt}' found in box.")
-                    return JSONResponse({"detections": [], "error": f"Could not find '{text_prompt}' in this area. Try adjusting confidence."})
+                    print(f"DEBUG: Validation Failed. No '{text_prompt}' found in box. Fallback to generic SAM with label 'object'.")
+                    # Fallback policy: Proceed to SAM but with generic label
+                    text_prompt = "object"
                     
             except Exception as e:
                 print(f"WARNING: YOLO-World Validation failed: {e}. Proceeding without validation.")
@@ -873,101 +875,82 @@ def extend_line(points_tuples, expansion=5000):
         
     return points_tuples
 
+
+
 @app.post("/api/edit-polygon-boolean")
 async def edit_polygon_boolean(
-    target_points: str = Form(...), # JSON List [x,y,x,y...]
-    cutter_points: str = Form(...), # JSON List [x,y,x,y...]
+    target_points: str = Form(...),
+    cutter_points: str = Form(...),
     operation: str = Form("subtract")
 ):
-    """
-    Performs boolean operations on polygons using Shapely.
-    Default operation: Subtract (Knife).
-    """
     try:
         t_pts = json.loads(target_points)
         c_pts = json.loads(cutter_points)
         
-        if len(c_pts) < 4: # Line needs at least 2 points (4 coords)
-             return JSONResponse({"error": "Invalid cutter points"}, status_code=400)
-
-        # Convert to [(x,y), (x,y)...]
+        # Poligonu oluştur
         t_tuples = list(zip(t_pts[::2], t_pts[1::2]))
-        c_tuples = list(zip(c_pts[::2], c_pts[1::2]))
-        
-        poly_target = ShapelyPolygon(t_tuples)
-        
-        # Knife Logic: Line String Buffer
-        if operation == "subtract":
-            # Smart Extend
-            c_tuples = extend_line(c_tuples)
-            
-            # Treat as LineString and Buffer
-            line_cutter = LineString(c_tuples)
-            poly_cutter = line_cutter.buffer(3) # 3 pixel width cut (~6px total)
-        else:
-            poly_cutter = ShapelyPolygon(c_tuples)
-        
-        # Validation & Cleanup
+        poly_target = ShapelyPolygon(t_tuples).buffer(0)
         if not poly_target.is_valid:
             poly_target = make_valid(poly_target)
-        if not poly_cutter.is_valid:
-            poly_cutter = make_valid(poly_cutter)
-            
-        # Buffer(0) trick to fix self-intersections
-        poly_target = poly_target.buffer(0)
-        poly_cutter = poly_cutter.buffer(0)
 
-        # Perform Operation
-        result = None
-        if operation == "subtract":
-            result = poly_target.difference(poly_cutter)
-        elif operation == "intersect":
-            result = poly_target.intersection(poly_cutter)
-        elif operation == "union":
-            result = poly_target.union(poly_cutter)
-        else:
-             return JSONResponse({"error": "Unknown operation"}, status_code=400)
+        # Çizgi oluştur
+        c_tuples = list(zip(c_pts[::2], c_pts[1::2]))
+        if len(c_tuples) < 2: return JSONResponse({"error": "Line too short"}, status_code=400)
 
-        # Process Result
-        final_polys = []
+        # --- SMART EXTEND (Uçları Uzatma) ---
+        # Kullanıcının çizdiği çizginin uçlarını biraz uzatalım ki "ucu ucuna yetmedi" olmasın.
+        p_start = np.array(c_tuples[0])
+        p_end = np.array(c_tuples[-1])
         
-        if result.is_empty:
-             return JSONResponse({"polygons": []})
+        # Başlangıçtan geriye uzat
+        v_start = p_start - np.array(c_tuples[1])
+        norm_s = np.linalg.norm(v_start)
+        if norm_s > 0:
+            p_start_new = p_start + (v_start / norm_s) * 20 # 20px uzat
+            c_tuples[0] = tuple(p_start_new)
 
-        if isinstance(result, ShapelyPolygon):
-             # Simple Polygon
-             if result.area > 10: # Artifact filter
-                 x, y = result.exterior.coords.xy
-                 flat = []
-                 for i in range(len(x)):
-                     flat.append(x[i])
-                     flat.append(y[i])
-                 final_polys.append(flat)
-             
-        elif isinstance(result, MultiPolygon):
-             for p in result.geoms:
-                 if p.area > 10: # Artifact filter
-                     x, y = p.exterior.coords.xy
-                     flat = []
-                     for i in range(len(x)):
-                         flat.append(x[i])
-                         flat.append(y[i])
-                     final_polys.append(flat)
-        elif result.geom_type == 'GeometryCollection':
-             # Might happen if diff leaves points/lines
-             for geom in result.geoms:
-                 if geom.geom_type == 'Polygon' and geom.area > 10:
-                     x, y = geom.exterior.coords.xy
-                     flat = []
-                     for i in range(len(x)):
-                         flat.append(x[i])
-                         flat.append(y[i])
-                     final_polys.append(flat)
+        # Bitişten ileriye uzat
+        v_end = p_end - np.array(c_tuples[-2])
+        norm_e = np.linalg.norm(v_end)
+        if norm_e > 0:
+            p_end_new = p_end + (v_end / norm_e) * 20 # 20px uzat
+            c_tuples[-1] = tuple(p_end_new)
+
+        cutter_line = LineString(c_tuples)
+
+        # --- İŞLEM: SPLIT (BÖLME) ---
+        # Difference yerine Split kullanıyoruz. Bu daha kararlı çalışır.
+        try:
+            split_result = split(poly_target, cutter_line)
+        except Exception as split_err:
+            print(f"Split failed, falling back to buffer diff: {split_err}")
+            # Yedek plan: Eğer split hata verirse eski buffer yöntemini dene
+            cutter_poly = cutter_line.buffer(1.5)
+            split_result = poly_target.difference(cutter_poly)
+
+        # --- SONUÇLARI TOPLA ---
+        final_polys = []
+
+        def extract(geom):
+            if geom.geom_type == 'Polygon':
+                if geom.area > 10: # Minik parçaları at
+                    x, y = geom.exterior.coords.xy
+                    flat = []
+                    for i in range(len(x)):
+                        flat.append(x[i])
+                        flat.append(y[i])
+                    final_polys.append(flat)
+            elif geom.geom_type in ['MultiPolygon', 'GeometryCollection']:
+                for g in geom.geoms:
+                    extract(g)
+        
+        # split sonucu genelde bir GeometryCollection döner
+        extract(split_result)
 
         return JSONResponse({"polygons": final_polys})
 
     except Exception as e:
-        print(f"Error in boolean op: {e}")
+        print(f"Error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.post("/api/segment-lasso")

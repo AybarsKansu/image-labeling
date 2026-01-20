@@ -22,6 +22,43 @@ const stringToColor = (str) => {
     return color;
 };
 
+// --- Helper: Distance Point to Segment ---
+const distanceToSegment = (p, v, w) => {
+    const l2 = Math.pow(v.x - w.x, 2) + Math.pow(v.y - w.y, 2);
+    if (l2 === 0) return Math.sqrt(Math.pow(p.x - v.x, 2) + Math.pow(p.y - v.y, 2));
+    let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    const proj = { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) };
+    return Math.sqrt(Math.pow(p.x - proj.x, 2) + Math.pow(p.y - proj.y, 2));
+};
+
+// --- Helper: Bounding Box Intersection ---
+const doBoxesIntersect = (box1, box2) => {
+    return (
+        box1.x < box2.x + box2.width &&
+        box1.x + box1.width > box2.x &&
+        box1.y < box2.y + box2.height &&
+        box1.y + box1.height > box2.y
+    );
+};
+
+// --- Helper: Get Poly Bounds ---
+const getPolyBounds = (points) => {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = 0; i < points.length; i += 2) {
+        const x = points[i], y = points[i + 1];
+        minX = Math.min(minX, x); minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+    }
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+};
+
+// --- Helper: Get Line Bounds ---
+const getLineBounds = (points) => {
+    // Exact same logic as poly bounds
+    return getPolyBounds(points);
+};
+
 const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
     // --- State: Image & Layout ---
     const [imageFile, setImageFile] = useState(null);
@@ -42,6 +79,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
     const [tool, setTool] = useState('select'); // select, pan, box, poly, ai-box, pen
     const [aiBoxMode, setAiBoxMode] = useState('rect'); // 'rect' | 'lasso'
     const [color, setColor] = useState('#205a09ff'); // Tool color
+    const [eraserSize, setEraserSize] = useState(20); // Eraser Radius
 
     const [enableAugmentation, setEnableAugmentation] = useState(false); // Augmentation Checkbox
 
@@ -382,7 +420,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
 
         // Eraser Logic
         if (isDrawing && tool === 'eraser') {
-            const radius = ERASER_RADIUS / imageLayout.scale;
+            const radius = eraserSize / imageLayout.scale;
             const rSq = radius * radius;
 
             // Optimization: Only update if anything changed
@@ -400,13 +438,60 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                 for (let i = 0; i < ann.points.length; i += 2) {
                     const px = ann.points[i];
                     const py = ann.points[i + 1];
-                    const dSq = Math.pow(px - pos.x, 2) + Math.pow(py - pos.y, 2);
+                    const pNextX = ann.points[(i + 2) % ann.points.length];
+                    const pNextY = ann.points[(i + 3) % ann.points.length];
 
+                    // Check Distance to Vertex
+                    /*
+                    const dSq = Math.pow(px - pos.x, 2) + Math.pow(py - pos.y, 2);
                     if (dSq > rSq) {
                         newPoints.push(px, py);
                     } else {
                         shapeChanged = true;
                     }
+                    */
+
+                    // Check Distance to Edge (Segment P_curr -> P_next)
+                    // If close to edge, delete BOTH vertices of that edge? 
+                    // Or keep checking vertices? 
+                    // User Request: "Check distance to Line Segments... If distance < eraserSize: Mark BOTH P1 and P2 for deletion."
+
+                    // But we iterate vertices. Let's do a pass to mark vertices first.
+                }
+
+                // New Logic:
+                const toRemove = new Set();
+                const count = ann.points.length / 2;
+
+                for (let i = 0; i < count; i++) {
+                    const idx1 = i * 2;
+                    const idx2 = (i * 2 + 1);
+                    const p1 = { x: ann.points[idx1], y: ann.points[idx2] };
+
+                    const nextI = (i + 1) % count;
+                    const nextIdx1 = nextI * 2;
+                    const nextIdx2 = (nextI * 2 + 1);
+                    const p2 = { x: ann.points[nextIdx1], y: ann.points[nextIdx2] };
+
+                    const dist = distanceToSegment(pos, p1, p2);
+
+                    if (dist < radius) {
+                        // Mark both for deletion
+                        toRemove.add(i);
+                        toRemove.add(nextI);
+                        shapeChanged = true;
+                    }
+                }
+
+                if (shapeChanged) {
+                    for (let i = 0; i < count; i++) {
+                        if (!toRemove.has(i)) {
+                            newPoints.push(ann.points[i * 2], ann.points[i * 2 + 1]);
+                        }
+                    }
+
+                    anyChange = true;
+                    return { ...ann, points: newPoints };
                 }
 
                 if (shapeChanged) {
@@ -428,6 +513,8 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
             }
             return;
         }
+
+
 
         if (!isDrawing) return;
 
@@ -528,63 +615,69 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
         }
 
         if (tool === 'knife') {
-            if (currentPenPoints.length > 2) { // Need at least 2 points for a line
-                // 1. Identify Target
-                let targetIndex = selectedIndex;
+            if (currentPenPoints.length > 4) { // En az 2 nokta (4 koordinat)
 
-                if (targetIndex === null) {
-                    // Try to find a shape that the knife stroke starts inside
-                    const startP = { x: currentPenPoints[0], y: currentPenPoints[1] };
-                    targetIndex = getClickedShape(startP);
+                // 1. Hedef Bulma (Line Intersection)
+                // Çizilen çizginin bounding box'ı hangi poligonlara değiyor?
+                const lineBounds = getLineBounds(currentPenPoints); // Bunu önceki cevaptaki helper ile yapın
+
+                // En üstteki katmandan (son eklenenden) başlayarak ara
+                let targetIndex = null;
+                for (let i = annotations.length - 1; i >= 0; i--) {
+                    const ann = annotations[i];
+                    if (ann.type !== 'poly') continue;
+
+                    // Basit kutu çarpışma testi
+                    const polyBounds = getPolyBounds(ann.points);
+                    if (doBoxesIntersect(lineBounds, polyBounds)) {
+                        targetIndex = i;
+                        break; // İlk bulduğunu kes
+                    }
                 }
 
                 if (targetIndex !== null) {
                     const targetAnn = annotations[targetIndex];
-                    if (targetAnn.type === 'poly' || targetAnn.type === 'box') {
-                        setIsProcessing(true);
-                        addToHistory(annotations); // Snapshot BEFORE processing/update
 
-                        try {
-                            const formData = new FormData();
-                            formData.append('target_points', JSON.stringify(targetAnn.points));
-                            formData.append('cutter_points', JSON.stringify(currentPenPoints));
-                            formData.append('operation', 'subtract');
+                    setIsProcessing(true); // Spinner göster
+                    // Tarihçeye ekle
+                    addToHistory(annotations);
 
-                            const res = await axios.post(`${API_URL}/edit-polygon-boolean`, formData);
+                    const formData = new FormData();
+                    formData.append('target_points', JSON.stringify(targetAnn.points));
+                    formData.append('cutter_points', JSON.stringify(currentPenPoints));
+                    formData.append('operation', 'subtract');
 
-                            if (res.data.polygons) {
-                                // Remove old target
+                    axios.post(`${API_URL}/edit-polygon-boolean`, formData)
+                        .then(res => {
+                            if (res.data.polygons && res.data.polygons.length > 0) {
                                 const newAnns = [...annotations];
+                                // Hedef poligonu sil
                                 newAnns.splice(targetIndex, 1);
 
-                                // Add new parts
-                                res.data.polygons.forEach(polyPoints => {
-                                    if (polyPoints.length >= 6) {
-                                        newAnns.push({
-                                            id: crypto.randomUUID(),
-                                            type: 'poly',
-                                            points: polyPoints,
-                                            label: targetAnn.label,
-                                            originalRawPoints: polyPoints
-                                        });
-                                    }
+                                // Yeni parçaları ekle
+                                res.data.polygons.forEach(pts => {
+                                    newAnns.push({
+                                        id: crypto.randomUUID(),
+                                        type: 'poly',
+                                        points: pts,
+                                        label: targetAnn.label, // Etiketi koru (örn: plane)
+                                        originalRawPoints: pts
+                                    });
                                 });
-
                                 setAnnotations(newAnns);
-                                setSelectedIndex(null); // Deselect
+                                setSelectedIndex(null);
                             }
-                        } catch (err) {
-                            console.error("Knife failed", err);
-                            // alert("Knife operation failed"); 
-                            // Silent fail or toast better?
-                        } finally {
-                            setIsProcessing(false);
-                        }
-                    }
+                        })
+                        .catch(err => console.error("Knife error", err))
+                        .finally(() => {
+                            setIsProcessing(false); // Spinner gizle
+                            setCurrentPenPoints([]); // Çizgiyi temizle
+                        });
+
+                    return; // Async işlem bitene kadar bekle
                 }
             }
-            setCurrentPenPoints([]);
-            return;
+            setCurrentPenPoints([]); // Hedef yoksa çizgiyi sil
         }
 
         if (tool === 'box') {
@@ -1300,6 +1393,19 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                             >
                                 🧹 Erase
                             </button>
+                            {tool === 'eraser' && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                    <input
+                                        type="range"
+                                        min="5"
+                                        max="100"
+                                        value={eraserSize}
+                                        onChange={(e) => setEraserSize(Number(e.target.value))}
+                                        style={{ width: '60px', cursor: 'pointer' }}
+                                        title={`Eraser Size: ${eraserSize}`}
+                                    />
+                                </div>
+                            )}
                             <button
                                 onClick={() => setTool('select')}
                                 style={{
@@ -1630,7 +1736,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                                         <Circle
                                             x={mousePos.x}
                                             y={mousePos.y}
-                                            radius={ERASER_RADIUS / imageLayout.scale}
+                                            radius={eraserSize / imageLayout.scale}
                                             stroke="#f44336"
                                             strokeWidth={1 / imageLayout.scale}
                                             listening={false}
