@@ -9,6 +9,8 @@ import PreprocessingModal from './PreprocessingModal';
 const API_URL = 'http://localhost:8000/api';
 const ERASER_RADIUS = 20;
 
+
+
 // --- Utils ---
 const stringToColor = (str) => {
     let hash = 0;
@@ -60,7 +62,7 @@ const getLineBounds = (points) => {
     return getPolyBounds(points);
 };
 
-const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
+const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) => {
     // --- State: Image & Layout ---
     const [imageFile, setImageFile] = useState(null);
     const [imageUrl, setImageUrl] = useState(null);
@@ -110,6 +112,14 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
     const [showSettings, setShowSettings] = useState(false);
     const [showTrainModal, setShowTrainModal] = useState(false);
 
+    // --- Panel Drag State (for Detected Labels) ---
+    const [panelPos, setPanelPos] = useState({ x: 20, y: 20 });
+    const [panelSize, setPanelSize] = useState({ width: 280, height: 200 });
+    const [isPanelDragging, setIsPanelDragging] = useState(false);
+    const [isPanelResizing, setIsPanelResizing] = useState(false);
+    const panelDragOffset = useRef({ x: 0, y: 0 });
+    const panelResizeStart = useRef({ x: 0, y: 0, width: 0, height: 0 });
+
     const startPosRef = useRef({ x: 0, y: 0 });
     const stageRef = useRef(null);
     const groupRef = useRef(null);
@@ -117,6 +127,36 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
     // Track if we just finished a drawing action to prevent immediate deselect on click
     const justFinishedDrawingRef = useRef(false);
     const isRightPanningRef = useRef(false);
+
+    // --- Panel Drag & Resize Effect ---
+    useEffect(() => {
+        const handlePanelMouseMove = (e) => {
+            if (isPanelDragging) {
+                setPanelPos({
+                    x: e.clientX - panelDragOffset.current.x,
+                    y: e.clientY - panelDragOffset.current.y
+                });
+            }
+            if (isPanelResizing) {
+                const newWidth = Math.max(100, panelResizeStart.current.width + (e.clientX - panelResizeStart.current.x));
+                const newHeight = Math.max(100, panelResizeStart.current.height + (e.clientY - panelResizeStart.current.y));
+                setPanelSize({ width: newWidth, height: newHeight });
+            }
+        };
+        const handlePanelMouseUp = () => {
+            setIsPanelDragging(false);
+            setIsPanelResizing(false);
+        };
+
+        if (isPanelDragging || isPanelResizing) {
+            window.addEventListener('mousemove', handlePanelMouseMove);
+            window.addEventListener('mouseup', handlePanelMouseUp);
+        }
+        return () => {
+            window.removeEventListener('mousemove', handlePanelMouseMove);
+            window.removeEventListener('mouseup', handlePanelMouseUp);
+        };
+    }, [isPanelDragging, isPanelResizing]);
 
     // --- Training Status Polling ---
     useEffect(() => {
@@ -1204,6 +1244,25 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                         flexWrap: 'wrap',
                         borderBottom: '1px solid #555'
                     }}>
+                        {/* Models Button */}
+                        <button
+                            onClick={onOpenModelManager}
+                            style={{
+                                background: '#374151',
+                                color: 'white',
+                                border: '1px solid #4b5563',
+                                padding: '8px 12px',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontWeight: 'bold',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px'
+                            }}
+                        >
+                            <span>⚡</span> Models
+                        </button>
+
                         <button
                             onClick={() => {
                                 setImageObj(null);
@@ -1491,25 +1550,6 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
 
                             <div style={{ width: '1px', height: '24px', background: '#666' }}></div>
 
-                            {/* Model Selector (New Placement) */}
-                            <select
-                                value={selectedModel}
-                                onChange={(e) => setSelectedModel(e.target.value)}
-                                style={{
-                                    background: '#222',
-                                    color: 'white',
-                                    border: '1px solid #555',
-                                    padding: '6px',
-                                    borderRadius: '4px',
-                                    fontSize: '12px',
-                                    maxWidth: '120px'
-                                }}
-                                title="Select AI Model"
-                            >
-                                {availableModels.map(m => (
-                                    <option key={m} value={m}>{m}</option>
-                                ))}
-                            </select>
 
                             <button
                                 onClick={() => setShowSettings(true)}
@@ -1852,18 +1892,19 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                         </Stage>
 
                         {/* Persistent Right Sidebar */}
-                        <div style={{
-                            position: 'absolute',
-                            top: '10px',
-                            right: '10px',
-                            width: '280px',
-                            maxHeight: '80vh',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '10px',
-                            zIndex: 100,
-                            pointerEvents: 'none' // Allow click-through for canvas, but sidebar content needs pointerActions
-                        }}>
+                        <div
+                            style={{
+                                position: 'absolute',
+                                top: `${panelPos.y}px`,
+                                left: `${panelPos.x}px`,
+                                width: '280px',
+                                maxHeight: '80vh',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '10px',
+                                zIndex: 100,
+                                pointerEvents: 'none'
+                            }}>
                             {/* Label Statistics Panel */}
                             <div style={{
                                 background: '#333',
@@ -1872,12 +1913,37 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                                 padding: '15px',
                                 color: 'white',
                                 boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-                                pointerEvents: 'auto'
+                                pointerEvents: 'auto',
+                                width: `${panelSize.width}px`,
+                                height: `${panelSize.height}px`,
+                                position: 'relative',
+                                display: 'flex',
+                                flexDirection: 'column'
                             }}>
-                                <h3 style={{ margin: '0 0 10px 0', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', borderBottom: '1px solid #444', paddingBottom: '5px' }}>
-                                    Detected Labels
+                                <h3
+                                    onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        setIsPanelDragging(true);
+                                        panelDragOffset.current = {
+                                            x: e.clientX - panelPos.x,
+                                            y: e.clientY - panelPos.y
+                                        };
+                                    }}
+                                    style={{
+                                        margin: '0 0 10px 0',
+                                        fontSize: '12px',
+                                        fontWeight: 'bold',
+                                        textTransform: 'uppercase',
+                                        borderBottom: '1px solid #444',
+                                        paddingBottom: '5px',
+                                        cursor: isPanelDragging ? 'grabbing' : 'grab',
+                                        userSelect: 'none',
+                                        flexShrink: 0
+                                    }}
+                                >
+                                    ⠿ Detected Labels
                                 </h3>
-                                <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                                <div style={{ flex: 1, overflowY: 'auto' }}>
                                     {Object.entries(annotations.reduce((acc, curr) => {
                                         const lbl = curr.label || 'unknown';
                                         acc[lbl] = (acc[lbl] || 0) + 1;
@@ -1910,6 +1976,30 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                                         </div>
                                     )}
                                 </div>
+                                {/* Resize Handle */}
+                                <div
+                                    onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setIsPanelResizing(true);
+                                        panelResizeStart.current = {
+                                            x: e.clientX,
+                                            y: e.clientY,
+                                            width: panelSize.width,
+                                            height: panelSize.height
+                                        };
+                                    }}
+                                    style={{
+                                        position: 'absolute',
+                                        right: 0,
+                                        bottom: 0,
+                                        width: '16px',
+                                        height: '16px',
+                                        cursor: 'nwse-resize',
+                                        background: 'linear-gradient(135deg, transparent 50%, #666 50%)',
+                                        borderRadius: '0 0 8px 0'
+                                    }}
+                                />
                             </div>
 
                             {/* Properties Panel (Conditional) */}

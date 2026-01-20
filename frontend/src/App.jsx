@@ -17,27 +17,13 @@ function App() {
 
   return (
     <div className="App">
-      {/* Premium Header */}
-      <header className="app-header">
-        <div className="nav-actions">
-          <button
-            className={`nav-btn ${showModelManager ? 'active' : ''}`}
-            onClick={() => setShowModelManager(true)}
-          >
-            <span>⚡</span> Models
-          </button>
-          <button
-            className={`nav-btn ${showTrainPanel ? 'active' : ''}`}
-            onClick={() => setShowTrainPanel(true)}
-          >
-            <span>🔥</span> Train
-          </button>
-        </div>
-      </header>
-
       {/* Main Workspace */}
       <main className="main-workspace">
-        <AnnotationApp selectedModel={selectedModel} setSelectedModel={setSelectedModel} />
+        <AnnotationApp
+          selectedModel={selectedModel}
+          setSelectedModel={setSelectedModel}
+          onOpenModelManager={() => setShowModelManager(true)}
+        />
       </main>
 
       {/* Modals & Overlay Panels */}
