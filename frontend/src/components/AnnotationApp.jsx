@@ -3,6 +3,7 @@ import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Group, Text } fr
 import useImage from 'use-image';
 import axios from 'axios';
 import SettingsModal from './SettingsModal';
+import PreprocessingModal from './PreprocessingModal';
 
 // --- Config ---
 const API_URL = 'http://localhost:8000/api';
@@ -94,6 +95,9 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
     const [currentPenPoints, setCurrentPenPoints] = useState([]); // [x, y, x, y...]
 
     // ... (rest of state)
+    const [trainingStatus, setTrainingStatus] = useState({ is_training: false, message: 'Idle' });
+
+
 
 
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -104,6 +108,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
     const [isProcessing, setIsProcessing] = useState(false);
     const [saveMessage, setSaveMessage] = useState(null);
     const [showSettings, setShowSettings] = useState(false);
+    const [showTrainModal, setShowTrainModal] = useState(false);
 
     const startPosRef = useRef({ x: 0, y: 0 });
     const stageRef = useRef(null);
@@ -112,6 +117,19 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
     // Track if we just finished a drawing action to prevent immediate deselect on click
     const justFinishedDrawingRef = useRef(false);
     const isRightPanningRef = useRef(false);
+
+    // --- Training Status Polling ---
+    useEffect(() => {
+        let interval;
+        if (showTrainModal) {
+            interval = setInterval(() => {
+                axios.get(`${API_URL}/training-status`).then(res => {
+                    setTrainingStatus(res.data);
+                }).catch(() => { });
+            }, 1000);
+        }
+        return () => clearInterval(interval);
+    }, [showTrainModal]);
 
     // --- Image Fit on Load ---
     useEffect(() => {
@@ -1473,6 +1491,26 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
 
                             <div style={{ width: '1px', height: '24px', background: '#666' }}></div>
 
+                            {/* Model Selector (New Placement) */}
+                            <select
+                                value={selectedModel}
+                                onChange={(e) => setSelectedModel(e.target.value)}
+                                style={{
+                                    background: '#222',
+                                    color: 'white',
+                                    border: '1px solid #555',
+                                    padding: '6px',
+                                    borderRadius: '4px',
+                                    fontSize: '12px',
+                                    maxWidth: '120px'
+                                }}
+                                title="Select AI Model"
+                            >
+                                {availableModels.map(m => (
+                                    <option key={m} value={m}>{m}</option>
+                                ))}
+                            </select>
+
                             <button
                                 onClick={() => setShowSettings(true)}
                                 style={{
@@ -1522,6 +1560,24 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                                 }}
                             >
                                 💾 Save
+                            </button>
+
+
+                            <button
+                                onClick={() => setShowTrainModal(true)}
+                                style={{
+                                    background: 'linear-gradient(45deg, #ea580c, #d97706)',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '8px 12px',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontWeight: 'bold',
+                                    marginRight: '10px'
+                                }}
+                                title="Train Model"
+                            >
+                                🚂 Train
                             </button>
                             <button
                                 onClick={handleUndo}
@@ -1795,227 +1851,286 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                             </Layer>
                         </Stage>
 
-                        {/* Properties Panel */}
-                        {selectedAnn && (
+                        {/* Persistent Right Sidebar */}
+                        <div style={{
+                            position: 'absolute',
+                            top: '10px',
+                            right: '10px',
+                            width: '280px',
+                            maxHeight: '80vh',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '10px',
+                            zIndex: 100,
+                            pointerEvents: 'none' // Allow click-through for canvas, but sidebar content needs pointerActions
+                        }}>
+                            {/* Label Statistics Panel */}
                             <div style={{
-                                position: 'absolute',
-                                top: '10px',
-                                right: '10px',
-                                width: '280px',
                                 background: '#333',
                                 border: '1px solid #555',
                                 borderRadius: '8px',
                                 padding: '15px',
                                 color: 'white',
-                                zIndex: 100,
                                 boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-                                maxHeight: '80vh',
-                                overflowY: 'auto'
+                                pointerEvents: 'auto'
                             }}>
-                                <div style={{
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'center',
-                                    marginBottom: '12px'
-                                }}>
-                                    <h3 style={{ margin: 0, fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                                        Properties
-                                    </h3>
-                                    <button
-                                        onClick={() => setSelectedIndex(null)}
-                                        style={{
-                                            background: 'none',
-                                            border: 'none',
-                                            color: '#888',
-                                            fontSize: '20px',
-                                            cursor: 'pointer'
-                                        }}
-                                    >
-                                        ×
-                                    </button>
+                                <h3 style={{ margin: '0 0 10px 0', fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', borderBottom: '1px solid #444', paddingBottom: '5px' }}>
+                                    Detected Labels
+                                </h3>
+                                <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                                    {Object.entries(annotations.reduce((acc, curr) => {
+                                        const lbl = curr.label || 'unknown';
+                                        acc[lbl] = (acc[lbl] || 0) + 1;
+                                        return acc;
+                                    }, {})).map(([lbl, count]) => (
+                                        <div
+                                            key={lbl}
+                                            onClick={() => setFilterText(lbl)}
+                                            style={{
+                                                display: 'flex',
+                                                justifyContent: 'space-between',
+                                                fontSize: '12px',
+                                                padding: '4px 6px',
+                                                cursor: 'pointer',
+                                                background: filterText === lbl ? '#444' : 'transparent',
+                                                borderRadius: '4px',
+                                                transition: 'background 0.2s',
+                                                color: '#ddd'
+                                            }}
+                                            onMouseEnter={(e) => e.target.style.background = '#3a3a3a'}
+                                            onMouseLeave={(e) => e.target.style.background = filterText === lbl ? '#444' : 'transparent'}
+                                        >
+                                            <span>• {lbl}</span>
+                                            <span style={{ fontWeight: 'bold', color: '#888' }}>({count})</span>
+                                        </div>
+                                    ))}
+                                    {annotations.length === 0 && (
+                                        <div style={{ fontSize: '12px', color: '#666', fontStyle: 'italic' }}>
+                                            No annotations yet.
+                                        </div>
+                                    )}
                                 </div>
+                            </div>
 
-                                {/* AI Controls in Properties (Only relevant if this panel persists, but user asked for Top Right for Model Selector. 
+                            {/* Properties Panel (Conditional) */}
+                            {selectedAnn && (
+                                <div style={{
+                                    background: '#333',
+                                    border: '1px solid #555',
+                                    borderRadius: '8px',
+                                    padding: '15px',
+                                    color: 'white',
+                                    boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+                                    pointerEvents: 'auto',
+                                    overflowY: 'auto',
+                                    maxHeight: '50vh'
+                                }}>
+                                    {/* ... Existing Properties Content ... */}
+                                    <div style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        marginBottom: '12px'
+                                    }}>
+                                        <h3 style={{ margin: 0, fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                                            Properties
+                                        </h3>
+                                        <button
+                                            onClick={() => setSelectedIndex(null)}
+                                            style={{
+                                                background: 'none',
+                                                border: 'none',
+                                                color: '#888',
+                                                fontSize: '20px',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            ×
+                                        </button>
+                                    </div>
+
+                                    {/* AI Controls in Properties (Only relevant if this panel persists, but user asked for Top Right for Model Selector. 
                                     I will add the floating selector *outside* this if it's always visible, or inside if it's dynamic.
                                     The user said "Move Model Selector... to Top Right... It should not be in the main toolbar".
                                     I will add it as a separate absolute div below.
                                 */}
-                                <div style={{ marginBottom: '12px' }}>
+                                    <div style={{ marginBottom: '12px' }}>
 
-                                    {/* We removed the input from here as now the Top Filter Input acts as... wait, user might still want to Rename.
+                                        {/* We removed the input from here as now the Top Filter Input acts as... wait, user might still want to Rename.
                                 Let's add a Rename input here specifically for the selected item. */}
-                                    {/* Suggestions Chips */}
-                                    {selectedAnn.suggestions && selectedAnn.suggestions.length > 0 && (
-                                        <div style={{ marginBottom: '12px' }}>
-                                            <label style={{ fontSize: '10px', color: '#888', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>
-                                                AI Suggestions:
-                                            </label>
-                                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                                                {selectedAnn.suggestions.map((sug, i) => (
-                                                    <button
-                                                        key={i}
-                                                        onClick={() => {
-                                                            // Update Label
-                                                            updateLabel(sug.label);
-                                                            // Clear suggestions after picking one? Or keep them?
-                                                            // Let's keep them in case they changed mind, unless user wants clear.
-                                                            // User said "Clears the suggestions".
-                                                            const updated = [...annotations];
-                                                            updated[selectedIndex].suggestions = []; // Clear
-                                                            setAnnotations(updated);
-                                                        }}
-                                                        style={{
-                                                            background: '#2c3e50',
-                                                            border: '1px solid #34495e',
-                                                            color: '#3498db',
-                                                            borderRadius: '12px',
-                                                            padding: '4px 10px',
-                                                            fontSize: '11px',
-                                                            cursor: 'pointer',
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            gap: '4px'
-                                                        }}
-                                                        title={`Confidence: ${(sug.score * 100).toFixed(0)}%`}
-                                                    >
-                                                        <span>{sug.label}</span>
-                                                        <span style={{ fontSize: '9px', opacity: 0.7 }}>
-                                                            {Math.round(sug.score * 100)}%
-                                                        </span>
-                                                    </button>
-                                                ))}
+                                        {/* Suggestions Chips */}
+                                        {selectedAnn.suggestions && selectedAnn.suggestions.length > 0 && (
+                                            <div style={{ marginBottom: '12px' }}>
+                                                <label style={{ fontSize: '10px', color: '#888', textTransform: 'uppercase', marginBottom: '4px', display: 'block' }}>
+                                                    AI Suggestions:
+                                                </label>
+                                                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                                                    {selectedAnn.suggestions.map((sug, i) => (
+                                                        <button
+                                                            key={i}
+                                                            onClick={() => {
+                                                                // Update Label
+                                                                updateLabel(sug.label);
+                                                                // Clear suggestions after picking one? Or keep them?
+                                                                // Let's keep them in case they changed mind, unless user wants clear.
+                                                                // User said "Clears the suggestions".
+                                                                const updated = [...annotations];
+                                                                updated[selectedIndex].suggestions = []; // Clear
+                                                                setAnnotations(updated);
+                                                            }}
+                                                            style={{
+                                                                background: '#2c3e50',
+                                                                border: '1px solid #34495e',
+                                                                color: '#3498db',
+                                                                borderRadius: '12px',
+                                                                padding: '4px 10px',
+                                                                fontSize: '11px',
+                                                                cursor: 'pointer',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                gap: '4px'
+                                                            }}
+                                                            title={`Confidence: ${(sug.score * 100).toFixed(0)}%`}
+                                                        >
+                                                            <span>{sug.label}</span>
+                                                            <span style={{ fontSize: '9px', opacity: 0.7 }}>
+                                                                {Math.round(sug.score * 100)}%
+                                                            </span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <input
+                                            type="text"
+                                            placeholder="Rename..."
+                                            value={selectedAnn.label || ''}
+                                            onChange={(e) => updateLabel(e.target.value)}
+                                            style={{
+                                                width: '100%',
+                                                padding: '6px 8px',
+                                                borderRadius: '4px',
+                                                border: '1px solid #555',
+                                                background: '#222',
+                                                color: 'white',
+                                                fontSize: '12px',
+                                                boxSizing: 'border-box'
+                                            }}
+                                        />
+                                    </div>
+
+                                    <div style={{ marginBottom: '12px' }}>
+                                        <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#888', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
+                                            Metadata
+                                        </label>
+                                        <div style={{
+                                            background: '#222',
+                                            borderRadius: '4px',
+                                            padding: '8px',
+                                            fontSize: '11px',
+                                            color: '#aaa',
+                                            fontFamily: 'monospace'
+                                        }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                                <span>Type:</span>
+                                                <span style={{ color: '#0099ff' }}>{selectedAnn.type}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                <span>Points:</span>
+                                                <span>{selectedAnn.points?.length / 2 || 0}</span>
                                             </div>
                                         </div>
-                                    )}
+                                    </div>
+                                    {/* Simplify / Densify / Beautify / Reset */}
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginTop: '10px' }}>
+                                        <button
+                                            onClick={handleSimplify}
+                                            disabled={!selectedAnn.points || selectedAnn.points.length <= 6}
+                                            style={{
+                                                padding: '6px',
+                                                background: '#2196F3',
+                                                color: 'white',
+                                                border: 'none',
+                                                borderRadius: '4px',
+                                                cursor: 'pointer',
+                                                fontSize: '12px'
+                                            }}
+                                            title="Reduce points (RDP)"
+                                        >
+                                            Simplify
+                                        </button>
+                                        <button
+                                            onClick={handleDensify}
+                                            style={{
+                                                padding: '6px',
+                                                background: '#9C27B0',
+                                                color: 'white',
+                                                border: 'none',
+                                                borderRadius: '4px',
+                                                cursor: 'pointer',
+                                                fontSize: '12px'
+                                            }}
+                                            title="Add intermediate points"
+                                        >
+                                            Densify
+                                        </button>
+                                        <button
+                                            onClick={handleBeautify}
+                                            disabled={isProcessing}
+                                            style={{
+                                                padding: '6px',
+                                                background: 'linear-gradient(45deg, #FFD700, #FF8C00)',
+                                                color: 'white',
+                                                border: 'none',
+                                                borderRadius: '4px',
+                                                cursor: isProcessing ? 'not-allowed' : 'pointer',
+                                                fontSize: '12px',
+                                                fontWeight: 'bold',
+                                                gridColumn: 'span 2' // Full width
+                                            }}
+                                            title="Use AI to refine polygon shape (SAM)"
+                                        >
+                                            {isProcessing ? '✨ Refining...' : '✨ Beautify'}
+                                        </button>
+                                        <button
+                                            onClick={handleReset}
+                                            disabled={!selectedAnn.originalRawPoints}
+                                            style={{
+                                                padding: '6px',
+                                                background: '#607D8B',
+                                                color: 'white',
+                                                border: 'none',
+                                                borderRadius: '4px',
+                                                cursor: 'pointer',
+                                                fontSize: '14px',
+                                                gridColumn: 'span 2'
+                                            }}
+                                            title="Reset to Original"
+                                        >
+                                            ↺ Reset
+                                        </button>
+                                    </div>
 
-                                    <input
-                                        type="text"
-                                        placeholder="Rename..."
-                                        value={selectedAnn.label || ''}
-                                        onChange={(e) => updateLabel(e.target.value)}
+
+                                    <button
+                                        onClick={deleteSelected}
                                         style={{
                                             width: '100%',
-                                            padding: '6px 8px',
-                                            borderRadius: '4px',
-                                            border: '1px solid #555',
-                                            background: '#222',
-                                            color: 'white',
-                                            fontSize: '12px',
-                                            boxSizing: 'border-box'
-                                        }}
-                                    />
-                                </div>
-
-                                <div style={{ marginBottom: '12px' }}>
-                                    <label style={{ fontSize: '11px', fontWeight: 'bold', color: '#888', textTransform: 'uppercase', display: 'block', marginBottom: '8px' }}>
-                                        Metadata
-                                    </label>
-                                    <div style={{
-                                        background: '#222',
-                                        borderRadius: '4px',
-                                        padding: '8px',
-                                        fontSize: '11px',
-                                        color: '#aaa',
-                                        fontFamily: 'monospace'
-                                    }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                            <span>Type:</span>
-                                            <span style={{ color: '#0099ff' }}>{selectedAnn.type}</span>
-                                        </div>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                            <span>Points:</span>
-                                            <span>{selectedAnn.points?.length / 2 || 0}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                {/* Simplify / Densify / Beautify / Reset */}
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginTop: '10px' }}>
-                                    <button
-                                        onClick={handleSimplify}
-                                        disabled={!selectedAnn.points || selectedAnn.points.length <= 6}
-                                        style={{
-                                            padding: '6px',
-                                            background: '#2196F3',
-                                            color: 'white',
+                                            padding: '8px 12px',
+                                            background: '#c00',
                                             border: 'none',
                                             borderRadius: '4px',
+                                            color: 'white',
                                             cursor: 'pointer',
-                                            fontSize: '12px'
+                                            fontWeight: 'bold'
                                         }}
-                                        title="Reduce points (RDP)"
                                     >
-                                        Simplify
-                                    </button>
-                                    <button
-                                        onClick={handleDensify}
-                                        style={{
-                                            padding: '6px',
-                                            background: '#9C27B0',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '4px',
-                                            cursor: 'pointer',
-                                            fontSize: '12px'
-                                        }}
-                                        title="Add intermediate points"
-                                    >
-                                        Densify
-                                    </button>
-                                    <button
-                                        onClick={handleBeautify}
-                                        disabled={isProcessing}
-                                        style={{
-                                            padding: '6px',
-                                            background: 'linear-gradient(45deg, #FFD700, #FF8C00)',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '4px',
-                                            cursor: isProcessing ? 'not-allowed' : 'pointer',
-                                            fontSize: '12px',
-                                            fontWeight: 'bold',
-                                            gridColumn: 'span 2' // Full width
-                                        }}
-                                        title="Use AI to refine polygon shape (SAM)"
-                                    >
-                                        {isProcessing ? '✨ Refining...' : '✨ Beautify'}
-                                    </button>
-                                    <button
-                                        onClick={handleReset}
-                                        disabled={!selectedAnn.originalRawPoints}
-                                        style={{
-                                            padding: '6px',
-                                            background: '#607D8B',
-                                            color: 'white',
-                                            border: 'none',
-                                            borderRadius: '4px',
-                                            cursor: 'pointer',
-                                            fontSize: '14px',
-                                            gridColumn: 'span 2'
-                                        }}
-                                        title="Reset to Original"
-                                    >
-                                        ↺ Reset
+                                        🗑️ Delete
                                     </button>
                                 </div>
-
-
-                                <button
-                                    onClick={deleteSelected}
-                                    style={{
-                                        width: '100%',
-                                        padding: '8px 12px',
-                                        background: '#c00',
-                                        border: 'none',
-                                        borderRadius: '4px',
-                                        color: 'white',
-                                        cursor: 'pointer',
-                                        fontWeight: 'bold'
-                                    }}
-                                >
-                                    🗑️ Delete
-                                </button>
-                            </div>
-                        )}
+                            )}
+                        </div>
 
 
                     </div>
@@ -2038,9 +2153,41 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                         textIou={textIou}
                         setTextIou={setTextIou}
                     />
+
+                    <PreprocessingModal
+                        isOpen={showTrainModal}
+                        onClose={() => setShowTrainModal(false)}
+                        isTraining={trainingStatus.is_training}
+                        onStartTraining={(params) => {
+                            // Call API
+                            const formData = new FormData();
+                            formData.append('base_model', selectedModel);
+                            formData.append('epochs', params.epochs);
+                            formData.append('batch_size', params.batchSize);
+                            formData.append('preprocess_params', JSON.stringify({
+                                auto_orient: params.autoOrient,
+                                resize_mode: params.resizeMode,
+                                enable_tiling: params.enableTiling,
+                                tile_size: params.tileSize,
+                                tile_overlap: params.tileOverlap
+                            }));
+
+                            axios.post(`${API_URL}/train-model`, formData)
+                                .then(res => {
+                                    alert('Training Started! ' + res.data.message);
+                                    setShowTrainModal(false);
+                                    // Start polling status or just rely on status text
+                                })
+                                .catch(err => {
+                                    alert('Training Failed: ' + (err.response?.data?.error || err.message));
+                                    console.error(err);
+                                });
+                        }}
+                    />
                 </>
-            )}
-        </div>
+            )
+            }
+        </div >
     );
 };
 

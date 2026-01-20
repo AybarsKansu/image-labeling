@@ -163,6 +163,10 @@ def get_model(model_name: str = None):
 DATASET_DIR = Path("dataset").resolve()
 IMAGES_DIR = DATASET_DIR / "images"
 LABELS_DIR = DATASET_DIR / "labels"
+PROCESSED_DIR = DATASET_DIR / "processed"
+PROCESSED_IMAGES_DIR = PROCESSED_DIR / "images"
+PROCESSED_LABELS_DIR = PROCESSED_DIR / "labels"
+
 IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 LABELS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -189,8 +193,173 @@ def masks_to_polygons(masks) -> list:
         polygons.append(poly)
     return polygons
 
+def preprocess_dataset(params: dict):
+    """
+    Slices/Resizes images and labels.
+    params: { 'resize_mode': 'none'|'640'|'1024', 'enable_tiling': bool, 'tile_size': int, 'tile_overlap': float }
+    """
+    global TRAINING_STATUS
+    TRAINING_STATUS["message"] = "Preprocessing: Cleaning old data..."
+    
+    # 1. Clean Processed Dir
+    if PROCESSED_DIR.exists():
+        shutil.rmtree(PROCESSED_DIR)
+    PROCESSED_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    PROCESSED_LABELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Copy classes.txt
+    if (DATASET_DIR / "classes.txt").exists():
+        shutil.copy(DATASET_DIR / "classes.txt", PROCESSED_DIR / "classes.txt")
+
+    image_files = glob.glob(str(IMAGES_DIR / "*"))
+    total_images = len(image_files)
+    
+    resize_map = {'640': 640, '1024': 1024}
+    target_resize = resize_map.get(params.get('resize_mode'), None)
+    
+    tile_size = int(params.get('tile_size', 640))
+    overlap = float(params.get('tile_overlap', 0.2))
+    enable_tiling = params.get('enable_tiling', False)
+
+    print(f"Starting Preprocessing: {total_images} images. Tiling={enable_tiling}, Resize={target_resize}")
+
+    for i, img_path in enumerate(image_files):
+        TRAINING_STATUS["message"] = f"Preprocessing {i+1}/{total_images}"
+        TRAINING_STATUS["progress"] = (i / total_images) * 0.3 # Allocate 30% of progress bar to preprocessing
+        
+        try:
+            # Read Image
+            img = cv2.imread(img_path)
+            if img is None: continue
+            h, w = img.shape[:2]
+            
+            # Read Label
+            label_path = LABELS_DIR / (Path(img_path).stem + ".txt")
+            polygons = [] # List of (class_id, points_normalized)
+            
+            if label_path.exists():
+                with open(label_path, 'r') as f:
+                    lines = f.readlines()
+                    for line in lines:
+                        parts = line.strip().split()
+                        if len(parts) > 1:
+                            cls_id = int(parts[0])
+                            coords = [float(x) for x in parts[1:]]
+                            polygons.append((cls_id, coords))
+
+            # --- Logic Branch ---
+            if enable_tiling:
+                # 1. Generate Slices
+                slices = get_slices(h, w, tile_size, overlap)
+                
+                for s_idx, (x1, y1, x2, y2) in enumerate(slices):
+                    # Crop Image
+                    tile_img = img[y1:y2, x1:x2]
+                    th, tw = tile_img.shape[:2]
+                    if th < 10 or tw < 10: continue # Skip tiny garbage
+                    
+                    # Optional Resize of Tile
+                    if target_resize:
+                        tile_img = cv2.resize(tile_img, (target_resize, target_resize))
+                        # Scale factor for labels would be target/th, target/tw
+                        # But we normalize anyway, so we just need to know the tile bounds relative to original.
+                    
+                    # Process Polygons
+                    tile_polygons = []
+                    
+                    tile_box_poly = ShapelyPolygon([(x1, y1), (x2, y1), (x2, y2), (x1, y2)])
+                    
+                    for cls_id, coords in polygons:
+                        # Denormalize
+                        abs_coords = []
+                        for k in range(0, len(coords), 2):
+                            abs_coords.append((coords[k] * w, coords[k+1] * h))
+                        
+                        poly_shape = ShapelyPolygon(abs_coords)
+                        if not poly_shape.is_valid: poly_shape = make_valid(poly_shape)
+                        
+                        # Intersect
+                        try:
+                            intersection = tile_box_poly.intersection(poly_shape)
+                            
+                            if intersection.is_empty: continue
+                            
+                            # Handle Geometry Types (MultiPolygon, Polygon, GeometryCollection)
+                            geoms = []
+                            if intersection.geom_type == 'Polygon':
+                                geoms.append(intersection)
+                            elif intersection.geom_type == 'MultiPolygon':
+                                geoms.extend(intersection.geoms)
+                            elif intersection.geom_type == 'GeometryCollection':
+                                for g in intersection.geoms:
+                                    if g.geom_type == 'Polygon': geoms.append(g)
+                                    
+                            for g in geoms:
+                                # Provide relative normalized coordinates
+                                # g is in absolute original coords. 
+                                # Need to map to tile frame (0..tw, 0..th)
+                                # x_rel = x_abs - x1
+                                
+                                g_coords = list(g.exterior.coords)
+                                flattened = []
+                                for gx, gy in g_coords[:-1]: # skip last dup
+                                    nx = (gx - x1) / tw
+                                    ny = (gy - y1) / th
+                                    
+                                    # Clip to 0-1 strictly
+                                    nx = min(max(nx, 0), 1)
+                                    ny = min(max(ny, 0), 1)
+                                    
+                                    flattened.extend([nx, ny])
+                                
+                                if len(flattened) >= 6: # At least triangle
+                                    tile_polygons.append((cls_id, flattened))
+
+                        except Exception as e:
+                            print(f"Poly Error: {e}")
+
+                    # Save Tile if it has labels or (optional) keep 10% empty
+                    # For now only save if labels to reduce noise
+                    if tile_polygons:
+                        tile_name = f"{Path(img_path).stem}_t{s_idx}.jpg"
+                        cv2.imwrite(str(PROCESSED_IMAGES_DIR / tile_name), tile_img)
+                        
+                        with open(PROCESSED_LABELS_DIR / (Path(tile_name).stem + ".txt"), 'w') as f:
+                            for cls_id, pts in tile_polygons:
+                                line = f"{cls_id} " + " ".join([f"{x:.6f}" for x in pts]) + "\n"
+                                f.write(line)
+
+            else:
+                # No Tiling
+                final_img = img
+                final_h, final_w = h, w
+                
+                # Resize
+                if target_resize:
+                    final_img = cv2.resize(img, (target_resize, target_resize))
+                    final_h, final_w = target_resize, target_resize
+                    # Polygons are normalized, so NO CHANGE needed for labels!
+                
+                # Save
+                new_name = Path(img_path).name
+                cv2.imwrite(str(PROCESSED_IMAGES_DIR / new_name), final_img)
+                
+                # Copy/Write Labels
+                if polygons:
+                     with open(PROCESSED_LABELS_DIR / (Path(new_name).stem + ".txt"), 'w') as f:
+                        for cls_id, pts in polygons:
+                             # Just copy normalized points
+                             line = f"{cls_id} " + " ".join([f"{x:.6f}" for x in pts]) + "\n"
+                             f.write(line)
+
+        except Exception as e:
+            print(f"Failed to process {img_path}: {e}")
+
+    print("Preprocessing Complete.")
+    return True
+
 # --- Training Background Task ---
-def train_model_task(base_model_name: str, epochs: int, batch_size: int):
+def train_model_task(base_model_name: str, epochs: int, batch_size: int, preprocess_params: dict = None):
     global TRAINING_STATUS
     TRAINING_STATUS["is_training"] = True
     TRAINING_STATUS["progress"] = 0.0
@@ -199,15 +368,31 @@ def train_model_task(base_model_name: str, epochs: int, batch_size: int):
     TRAINING_STATUS["message"] = "Initializing..."
 
     try:
+        # 0. Preprocessing
+        target_data_dir = DATASET_DIR
+        
+        if preprocess_params:
+            success = preprocess_dataset(preprocess_params)
+            if success:
+                target_data_dir = PROCESSED_DIR
+            else:
+                 TRAINING_STATUS["message"] = "Preprocessing Failed."
+                 TRAINING_STATUS["is_training"] = False
+                 return
+
         # 1. Generate data.yaml
         yaml_content = f"""
-path: {DATASET_DIR.as_posix()}
+path: {target_data_dir.as_posix()}
 train: images
 val: images
 names:
 """
         # Read classes
-        classes_file = DATASET_DIR / "classes.txt"
+        classes_file = target_data_dir / "classes.txt"
+        if not classes_file.exists():
+            # If not in processed, try original (preprocessing mimics it usually but just in case)
+             classes_file = DATASET_DIR / "classes.txt"
+        
         if not classes_file.exists():
             raise Exception("No classes.txt found. Cannot train.")
         
@@ -240,7 +425,10 @@ names:
         # Custom Callback for Progress
         def on_train_epoch_end(trainer):
             TRAINING_STATUS["epoch"] = trainer.epoch + 1
-            TRAINING_STATUS["progress"] = (trainer.epoch + 1) / epochs
+            # 0.3 to 1.0 is training part (0.0-0.3 is preprocessing)
+            # trainer.epoch is 0-indexed
+            progress = 0.3 + ((trainer.epoch + 1) / epochs * 0.7)
+            TRAINING_STATUS["progress"] = min(progress, 0.99)
             TRAINING_STATUS["message"] = f"Epoch {trainer.epoch + 1}/{epochs}"
 
         model.add_callback("on_train_epoch_end", on_train_epoch_end)
@@ -375,19 +563,28 @@ async def train_model(
     background_tasks: BackgroundTasks,
     base_model: str = Form(...),
     epochs: int = Form(100),
-    batch_size: int = Form(16)
+    batch_size: int = Form(16),
+    preprocess_params: str = Form(None) # JSON String
 ):
     if TRAINING_STATUS["is_training"]:
         return JSONResponse({"error": "Training already in progress"}, status_code=400)
     
+    # Parse params
+    p_params = None
+    if preprocess_params:
+        try:
+            p_params = json.loads(preprocess_params)
+        except:
+            pass
+
     if "sam" in base_model.lower():
         # SAM training not supported (as per requirements fine-tuning logic usually different/not requested)
         return JSONResponse({"error": "SAM 3 is a Foundation Model and cannot be fine-tuned here. Use YOLO for custom objects."}, status_code=400)
 
     # Start Background Task
-    background_tasks.add_task(train_model_task, base_model, epochs, batch_size)
+    background_tasks.add_task(train_model_task, base_model, epochs, batch_size, p_params)
     
-    return JSONResponse({"success": True, "message": "Training started"})
+    return JSONResponse({"success": True, "message": "Preprocessing & Training started"})
 
 # --- Tiled Inference Helpers ---
 def get_slices(img_h, img_w, tile_size=640, overlap=0.2):
