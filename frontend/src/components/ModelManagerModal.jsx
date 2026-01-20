@@ -8,7 +8,7 @@ const officialModels = [
     {
         id: 'sam2.1_l.pt',
         name: 'SAM 2.1 Large',
-        desc: '🥇 Best for AI Box. Maximum Precision. (Rec. for RTX 5070)',
+        desc: '🥇 Best for AI Box. Maximum Precision.',
         type: 'sam'
     },
     {
@@ -119,7 +119,7 @@ export default function ModelManagerModal({ isOpen, onClose, activeModel, onSele
                 {/* Header */}
                 <div className="modal-header">
                     <div className="modal-title">
-                        <span>⚡</span> Model Manager (RTX 5070 Optimized)
+                        <span>⚡</span> Model Manager
                     </div>
                     <button onClick={onClose} className="close-btn">✖</button>
                 </div>

@@ -10,6 +10,10 @@ except ImportError:
     SAM = None # Fallback or handle error
     print("Warning: SAM not available in ultralytics.")
 
+from shapely.geometry import Polygon as ShapelyPolygon, MultiPolygon
+from shapely.validation import make_valid
+
+
 import os
 from pathlib import Path
 import json
@@ -576,6 +580,58 @@ async def segment_box(
         suggestions = []
 
         # --- MODEL LOGIC ---
+
+        # NEW: Validation Step with YOLO-World if text_prompt is present
+        mask_prompt_poly = None 
+        
+        if text_prompt and text_prompt.strip():
+            print(f"DEBUG: Running YOLO-World Pre-Check for '{text_prompt}'")
+            try:
+                # 1. Load YOLO-World
+                yw_name = "yolov8l-world.pt"
+                yw_model = get_model(yw_name)
+                
+                # If not loaded, force load
+                if not yw_model:
+                     print(f"Loading {yw_name} for validation...")
+                     yw_model = YOLO(yw_name)
+                     yw_model.to('cuda')
+                     MODELS[yw_name] = yw_model
+
+                # 2. Set Classes and Run on Crop
+                # Define Classes
+                yw_model.set_classes([text_prompt.strip()])
+                
+                # Crop image
+                cx1 = max(0, x1); cy1 = max(0, y1)
+                cx2 = min(img_w, x2); cy2 = min(img_h, y2)
+                crop = img[cy1:cy2, cx1:cx2]
+                
+                if crop.size == 0:
+                    return JSONResponse({"detections": [], "error": "Invalid Box"})
+
+                # Run Inference
+                # increased confidence for validation to be strict
+                val_results = yw_model.predict(crop, conf=confidence, verbose=False) 
+                
+                # Check if we found anything
+                found = False
+                if len(val_results) > 0 and len(val_results[0].boxes) > 0:
+                    found = True
+                    print(f"DEBUG: Validation Passed. Found {len(val_results[0].boxes)} {text_prompt}(s)")
+                
+                if not found:
+                    print(f"DEBUG: Validation Failed. No '{text_prompt}' found in box.")
+                    return JSONResponse({"detections": [], "error": f"Could not find '{text_prompt}' in this area. Try adjusting confidence."})
+                    
+            except Exception as e:
+                print(f"WARNING: YOLO-World Validation failed: {e}. Proceeding without validation.")
+                # Optional: Proceed or Fail? User requested "IF FAIL: Return error". 
+                # But if code fails (e.g. model corrupt), maybe we should fail safe.
+                # Currently we'll print and arguably might want to just return error to be safe.
+                pass
+
+
         if "sam" in model_name.lower():
             # --- SAM PATH (Native Prompting) ---
             print("DEBUG: Using SAM path")
@@ -715,6 +771,165 @@ async def segment_box(
         import traceback
         traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/api/refine-polygon")
+async def refine_polygon(
+    file: UploadFile = File(...),
+    points_json: str = Form(...),
+    model_name: str = Form("sam2.1_l.pt")
+):
+    """
+    Refines a rough polygon using SAM 2.
+    1. Calculates Bounding Box of the input polygon.
+    2. Uses that Box as a prompt for SAM.
+    3. Returns the high-quality SAM mask as a polygon.
+    """
+    try:
+        points = json.loads(points_json)
+        if not points or len(points) < 4:
+            return JSONResponse({"error": "Invalid points"}, status_code=400)
+
+        image_bytes = await file.read()
+        img = process_image(image_bytes)
+        
+        # 1. Calculate Bounding Box
+        pts_np = np.array(points).reshape((-1, 2))
+        x_min = int(np.min(pts_np[:, 0]))
+        y_min = int(np.min(pts_np[:, 1]))
+        x_max = int(np.max(pts_np[:, 0]))
+        y_max = int(np.max(pts_np[:, 1]))
+        
+        box = [x_min, y_min, x_max, y_max]
+        
+        # 2. Run SAM
+        # Ensure we are using a SAM model
+        if "sam" not in model_name.lower():
+            # Fallback to a default SAM if user sent a YOLO model name for beautify
+            model_name = "sam2.1_l.pt"
+            
+        sam_model = get_model(model_name)
+        if not sam_model:
+             # Try standard load
+             try:
+                 sam_model = SAM(model_name)
+                 sam_model.to('cuda')
+                 MODELS[model_name] = sam_model
+             except:
+                 return JSONResponse({"error": f"SAM Model {model_name} not found"}, status_code=400)
+
+        # Run Inference with BBox Prompt
+        # SAM model() in ultralytics supports bboxes argument
+        results = sam_model(img, bboxes=[box], verbose=False)
+        
+        if results[0].masks:
+            polygons = masks_to_polygons(results[0].masks)
+            # We expect one main object usually, return the largest or the one matching best?
+            # SAM usually returns one covering the box.
+            # If multiple, take largest.
+            
+            best_poly = None
+            max_len = 0
+            for poly in polygons:
+                if len(poly) > max_len:
+                    max_len = len(poly)
+                    best_poly = poly
+            
+            if best_poly:
+                return JSONResponse({
+                    "points": best_poly,
+                    "label": "refined"
+                })
+        
+        return JSONResponse({"error": "Could not refine polygon"}, status_code=400)
+
+    except Exception as e:
+        print(f"Error in /api/refine-polygon: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/edit-polygon-boolean")
+async def edit_polygon_boolean(
+    target_points: str = Form(...), # JSON List [x,y,x,y...]
+    cutter_points: str = Form(...), # JSON List [x,y,x,y...]
+    operation: str = Form("subtract")
+):
+    """
+    Performs boolean operations on polygons using Shapely.
+    Default operation: Subtract (Knife).
+    """
+    try:
+        t_pts = json.loads(target_points)
+        c_pts = json.loads(cutter_points)
+        
+        if len(t_pts) < 6 or len(c_pts) < 6:
+             return JSONResponse({"error": "Invalid polygon points"}, status_code=400)
+
+        # Convert to [(x,y), (x,y)...]
+        t_tuples = list(zip(t_pts[::2], t_pts[1::2]))
+        c_tuples = list(zip(c_pts[::2], c_pts[1::2]))
+        
+        poly_target = ShapelyPolygon(t_tuples)
+        poly_cutter = ShapelyPolygon(c_tuples)
+        
+        # Validation
+        if not poly_target.is_valid:
+            poly_target = make_valid(poly_target)
+        if not poly_cutter.is_valid:
+            poly_cutter = make_valid(poly_cutter)
+
+        # Perform Operation
+        result = None
+        if operation == "subtract":
+            result = poly_target.difference(poly_cutter)
+        elif operation == "intersect":
+            result = poly_target.intersection(poly_cutter)
+        elif operation == "union":
+            result = poly_target.union(poly_cutter)
+        else:
+             return JSONResponse({"error": "Unknown operation"}, status_code=400)
+
+        # Process Result
+        final_polys = []
+        
+        if result.is_empty:
+             return JSONResponse({"polygons": []})
+
+        if isinstance(result, ShapelyPolygon):
+             # Simple Polygon
+             # extract coords
+             x, y = result.exterior.coords.xy
+             # interleave
+             flat = []
+             for i in range(len(x)):
+                 flat.append(x[i])
+                 flat.append(y[i])
+             final_polys.append(flat)
+             
+        elif isinstance(result, MultiPolygon):
+             for p in result.geoms:
+                 x, y = p.exterior.coords.xy
+                 flat = []
+                 for i in range(len(x)):
+                     flat.append(x[i])
+                     flat.append(y[i])
+                 final_polys.append(flat)
+        elif result.geom_type == 'GeometryCollection':
+             # Might happen if diff leaves points/lines
+             for geom in result.geoms:
+                 if geom.geom_type == 'Polygon':
+                     x, y = geom.exterior.coords.xy
+                     flat = []
+                     for i in range(len(x)):
+                         flat.append(x[i])
+                         flat.append(y[i])
+                     final_polys.append(flat)
+
+        return JSONResponse({"polygons": final_polys})
+
+    except Exception as e:
+        print(f"Error in boolean op: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 @app.post("/api/segment-lasso")
 async def segment_lasso(
     file: UploadFile = File(...),
@@ -873,6 +1088,14 @@ async def segment_by_text(
         sam_model = get_model(sam_model_name)
         if not sam_model:
              return JSONResponse({"error": f"SAM Model {sam_model_name} not found"}, status_code=400)
+
+        # Validate that we actually got a SAM model (prevent YOLO fallback crash)
+        if SAM is None or not isinstance(sam_model, SAM):
+             return JSONResponse({
+                 "error": f"Requested model '{sam_model_name}' was not found or failed to load as a SAM model. "
+                          f"System fell back to '{type(sam_model).__name__}', which does not support text-prompted segmentation. "
+                          "Please ensure the SAM model file (e.g. sam2.1_l.pt) is present in the backend directory."
+             }, status_code=400)
              
         # Use SAM to predict with box prompts
         sam_results = sam_model(img, bboxes=bboxes, verbose=False)

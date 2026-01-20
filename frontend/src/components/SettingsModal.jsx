@@ -7,12 +7,8 @@ export default function SettingsModal({
     availableModels,
     selectedModel,
     setSelectedModel,
-    confidenceThreshold,
-    setConfidenceThreshold,
     enableAugmentation,
     setEnableAugmentation,
-    filterText,
-    setFilterText,
     textBoxConf,
     setTextBoxConf,
     textIou,
@@ -31,48 +27,9 @@ export default function SettingsModal({
                 </div>
 
                 <div className="modal-content">
-                    {/* Active Model */}
-                    <div className="form-group">
-                        <label className="form-label">Active Model</label>
-                        <select
-                            value={selectedModel}
-                            onChange={(e) => setSelectedModel(e.target.value)}
-                            className="form-select"
-                        >
-                            {availableModels.map(m => (
-                                <option key={m} value={m}>{m}</option>
-                            ))}
-                        </select>
-                    </div>
 
-                    {/* Confidence Slider */}
-                    <div className="form-group">
-                        <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span>Confidence Threshold</span>
-                            <span style={{ color: '#60a5fa' }}>{confidenceThreshold}%</span>
-                        </label>
-                        <input
-                            type="range"
-                            min="10"
-                            max="90"
-                            step="5"
-                            value={confidenceThreshold}
-                            onChange={(e) => setConfidenceThreshold(e.target.value)}
-                            style={{ width: '100%', cursor: 'pointer', accentColor: '#2563eb' }}
-                        />
-                    </div>
 
-                    {/* Label Filter */}
-                    <div className="form-group">
-                        <label className="form-label">Label Filter</label>
-                        <input
-                            type="text"
-                            placeholder="Filter labels..."
-                            value={filterText}
-                            onChange={(e) => setFilterText(e.target.value)}
-                            className="form-input"
-                        />
-                    </div>
+
 
                     {/* Data Augmentation */}
                     <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '1rem', padding: '10px', background: '#1f2937', borderRadius: '6px' }}>

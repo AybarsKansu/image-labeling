@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Line, Circle, Group, Text } from 'react-konva';
 import useImage from 'use-image';
 import axios from 'axios';
-import SettingsModal from '../src/components/SettingsModal';
+import SettingsModal from './SettingsModal';
 
 // --- Config ---
 const API_URL = 'http://localhost:8000/api';
@@ -36,6 +36,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
     const [selectedIndex, setSelectedIndex] = useState(null);
     const [selectedLabel, setSelectedLabel] = useState('');
     const [history, setHistory] = useState([]); // Stores snapshots of annotations "[[ann1, ann2], [ann1]]"
+    const [future, setFuture] = useState([]); // Redo stack
 
     // --- State: Tools ---
     const [tool, setTool] = useState('select'); // select, pan, box, poly, ai-box, pen
@@ -347,10 +348,12 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
     };
 
     // --- Helper: Add to History ---
+    // --- Helper: Add to History ---
     const addToHistory = (currentAnns) => {
         // Deep copy to ensure no reference issues
         const snapshot = JSON.parse(JSON.stringify(currentAnns));
         setHistory(prev => [...prev, snapshot]);
+        setFuture([]); // Clear future on new action
     };
 
     // --- Mouse Move ---
@@ -426,7 +429,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
 
         if (!isDrawing) return;
 
-        if (tool === 'pen' || (tool === 'ai-box' && aiBoxMode === 'lasso')) {
+        if (tool === 'pen' || (tool === 'ai-box' && aiBoxMode === 'lasso') || tool === 'knife') {
             setCurrentPenPoints([...currentPenPoints, pos.x, pos.y]);
             return;
         }
@@ -514,6 +517,76 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
             return;
         }
 
+        if (tool === 'knife') {
+            if (currentPenPoints.length > 6) {
+                // 1. Identify Target
+                let targetIndex = selectedIndex;
+
+                // If nothing selected, try to find one that contains the first point of knife? 
+                // Or actually intersection is better.
+                // For now, let's stick to "Selected" or "First Intersecting" logic.
+                // Simple approach: Logic on Backend is purely boolean diff.
+                // We need to know WHICH shape to cut.
+                // If user selected one, we cut that one.
+
+                if (targetIndex === null) {
+                    // Try to find a shape that the knife stroke starts inside or intersects
+                    // Simple check: Is the first point of knife inside any poly?
+                    const startP = { x: currentPenPoints[0], y: currentPenPoints[1] };
+                    targetIndex = getClickedShape(startP);
+                }
+
+                if (targetIndex !== null) {
+                    const targetAnn = annotations[targetIndex];
+                    if (targetAnn.type === 'poly' || targetAnn.type === 'box') {
+                        setIsProcessing(true);
+                        try {
+                            const formData = new FormData();
+                            // target_points
+                            // If box, need to convert to points first if not already (it is stored as poly points usually)
+                            formData.append('target_points', JSON.stringify(targetAnn.points));
+                            formData.append('cutter_points', JSON.stringify(currentPenPoints));
+                            formData.append('operation', 'subtract');
+
+                            const res = await axios.post(`${API_URL}/edit-polygon-boolean`, formData);
+
+                            if (res.data.polygons) {
+                                addToHistory(annotations);
+
+                                // Remove old target
+                                const newAnns = [...annotations];
+                                newAnns.splice(targetIndex, 1);
+
+                                // Add new parts
+                                res.data.polygons.forEach(polyPoints => {
+                                    // If a part is too small, maybe skip?
+                                    if (polyPoints.length >= 6) {
+                                        newAnns.push({
+                                            id: crypto.randomUUID(),
+                                            type: 'poly',
+                                            points: polyPoints,
+                                            label: targetAnn.label,
+                                            originalRawPoints: polyPoints
+                                        });
+                                    }
+                                });
+
+                                setAnnotations(newAnns);
+                                setSelectedIndex(null); // Deselect
+                            }
+                        } catch (err) {
+                            console.error("Knife failed", err);
+                            alert("Knife operation failed");
+                        } finally {
+                            setIsProcessing(false);
+                        }
+                    }
+                }
+            }
+            setCurrentPenPoints([]);
+            return;
+        }
+
         if (tool === 'box') {
             if (tempAnnotation && tempAnnotation.width > 5 && tempAnnotation.height > 5) {
                 const rect = {
@@ -590,11 +663,20 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                     justFinishedDrawingRef.current = true;
                 } else {
                     console.warn("AI Box found no objects");
-                    // DO NOT delete anything from annotations, just clear temp
+                    if (res.data.error) {
+                        alert(`AI Validation Failed: ${res.data.error}`);
+                    } else {
+                        setSaveMessage('⚠️ No objects found in box.');
+                        setTimeout(() => setSaveMessage(null), 3000);
+                    }
                 }
             } catch (err) {
                 console.error('AI Box failed', err);
-                alert('AI Detection Failed');
+                if (err.response && err.response.data && err.response.data.error) {
+                    alert(`AI Validation Failed: ${err.response.data.error}`);
+                } else {
+                    alert('AI Detection Failed');
+                }
             } finally {
                 setTempAnnotation(null);
             }
@@ -692,8 +774,22 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
     const handleUndo = () => {
         if (history.length > 0) {
             const previousState = history[history.length - 1];
+            setFuture(prev => [...prev, annotations]); // Save current to future
             setAnnotations(previousState);
             setHistory(prev => prev.slice(0, -1));
+            setSelectedIndex(null);
+        }
+    };
+
+    const handleRedo = () => {
+        if (future.length > 0) {
+            const nextState = future[future.length - 1];
+            // Do NOT call addToHistory here loop logic issues
+            // Manually update history
+            setHistory(prev => [...prev, annotations]);
+
+            setAnnotations(nextState);
+            setFuture(prev => prev.slice(0, -1));
             setSelectedIndex(null);
         }
     };
@@ -880,6 +976,52 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                     points: ann.originalRawPoints
                 };
                 setAnnotations(newAnns);
+            }
+        }
+    };
+
+    const handleBeautify = async () => {
+        if (selectedIndex !== null) {
+            const ann = annotations[selectedIndex];
+            // Allow Beautify for Poly or Box (converted to poly)
+            if (ann.type === 'poly' && ann.points && ann.points.length >= 6) {
+
+                setIsProcessing(true);
+                try {
+                    const formData = new FormData();
+                    formData.append('file', imageFile);
+                    // Flatten points just in case or ensure logic matches
+                    // ann.points is [x,y,x,y]
+                    formData.append('points_json', JSON.stringify(ann.points));
+                    formData.append('model_name', selectedModel); // Might need a SAM model, backend handles fallback
+
+                    const res = await axios.post(`${API_URL}/refine-polygon`, formData);
+
+                    if (res.data.points) {
+                        const newPoints = res.data.points;
+                        // Update shape
+                        addToHistory(annotations);
+                        const newAnns = [...annotations];
+
+                        // If originalRawPoints missing, set it now before overwriting
+                        const raw = ann.originalRawPoints || ann.points;
+
+                        newAnns[selectedIndex] = {
+                            ...ann,
+                            points: newPoints,
+                            originalRawPoints: raw // Preserve original
+                        };
+                        setAnnotations(newAnns);
+                        console.log("Beautify success");
+                    } else {
+                        alert("Beautify could not refine the shape.");
+                    }
+                } catch (err) {
+                    console.error("Beautify failed", err);
+                    alert("Beautify failed: " + (err.response?.data?.error || err.message));
+                } finally {
+                    setIsProcessing(false);
+                }
             }
         }
     };
@@ -1114,6 +1256,21 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                         </button>
 
                         <button
+                            onClick={() => setTool('knife')}
+                            style={{
+                                padding: '8px 12px',
+                                borderRadius: '4px',
+                                border: tool === 'knife' ? '1px solid #ff4444' : '1px solid transparent',
+                                background: tool === 'knife' ? 'rgba(255, 68, 68, 0.2)' : 'transparent',
+                                color: tool === 'knife' ? '#ff4444' : '#aaa',
+                                cursor: 'pointer'
+                            }}
+                            title="Draw a shape to cut existing polygons"
+                        >
+                            🔪 Knife
+                        </button>
+
+                        <button
                             onClick={() => setTool('box')}
                             style={{
                                 padding: '8px 12px',
@@ -1132,16 +1289,16 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                             <button
                                 onClick={() => setTool('eraser')}
                                 style={{
-                                    padding: '8px 12px',
+                                    background: tool === 'select' ? '#4CAF50' : '#555',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '6px 10px',
                                     borderRadius: '4px',
-                                    border: tool === 'eraser' ? '1px solid #f44336' : '1px solid transparent',
-                                    background: tool === 'eraser' ? 'rgba(244, 67, 54, 0.2)' : 'transparent',
-                                    color: tool === 'eraser' ? '#f44336' : '#aaa',
                                     cursor: 'pointer'
                                 }}
                                 title="Eraser: Click on shapes to delete them"
                             >
-                                🧹
+                                🧹 Erase
                             </button>
                             <button
                                 onClick={() => setTool('select')}
@@ -1174,6 +1331,42 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
 
                         {/* Settings Button (Replaces cluttered controls) */}
                         <div style={{ marginLeft: 'auto', display: 'flex', gap: '10px', alignItems: 'center' }}>
+
+
+                            {/* Label Filter */}
+                            <input
+                                type="text"
+                                placeholder="Filter Labels"
+                                value={filterText}
+                                onChange={(e) => setFilterText(e.target.value)}
+                                style={{
+                                    background: '#333',
+                                    color: 'white',
+                                    border: '1px solid #555',
+                                    borderRadius: '4px',
+                                    padding: '6px',
+                                    fontSize: '12px',
+                                    width: '100px'
+                                }}
+                            />
+
+                            {/* Confidence Threshold */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: '#aaa' }}>
+                                <span>Conf:</span>
+                                <input
+                                    type="range"
+                                    min="1"
+                                    max="100"
+                                    value={confidenceThreshold}
+                                    onChange={(e) => setConfidenceThreshold(e.target.value)}
+                                    style={{ width: '60px', cursor: 'pointer' }}
+                                    title={`Confidence: ${confidenceThreshold}%`}
+                                />
+                                <span>{confidenceThreshold}%</span>
+                            </div>
+
+                            <div style={{ width: '1px', height: '24px', background: '#666' }}></div>
+
                             <button
                                 onClick={() => setShowSettings(true)}
                                 style={{
@@ -1237,6 +1430,20 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                                 }}
                             >
                                 ↶ Undo
+                            </button>
+                            <button
+                                onClick={handleRedo}
+                                disabled={future.length === 0}
+                                style={{
+                                    background: future.length > 0 ? '#ff9800' : '#ccc',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '8px 12px',
+                                    borderRadius: '4px',
+                                    cursor: future.length > 0 ? 'pointer' : 'not-allowed'
+                                }}
+                            >
+                                ↷ Redo
                             </button>
                             <button
                                 onClick={handleClearAll}
@@ -1429,15 +1636,17 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                                             listening={false}
                                         />
                                     )}
-                                    {/* Pen / Lasso Preview (Live) */}
-                                    {((tool === 'pen') || (tool === 'ai-box' && aiBoxMode === 'lasso')) && currentPenPoints.length > 0 && (
+                                    {/* Pen / Lasso / Knife Preview (Live) */}
+                                    {((tool === 'pen') || (tool === 'ai-box' && aiBoxMode === 'lasso') || tool === 'knife') && currentPenPoints.length > 0 && (
                                         <Line
                                             points={currentPenPoints}
-                                            stroke={tool === 'ai-box' ? '#00e5ff' : color}
+                                            stroke={tool === 'knife' ? '#ff4444' : (tool === 'ai-box' ? '#00e5ff' : color)}
                                             strokeWidth={2}
                                             tension={0.5}
                                             lineCap="round"
                                             dash={tool === 'ai-box' ? [4, 4] : undefined}
+                                            closed={tool === 'knife'} // Knife looks better closed as loops
+                                            fill={tool === 'knife' ? 'rgba(255, 0, 0, 0.2)' : undefined}
                                         />
                                     )}
 
@@ -1613,13 +1822,12 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                                         </div>
                                     </div>
                                 </div>
-                                {/* Simplify / Densify / Reset */}
-                                <div style={{ display: 'flex', gap: '5px', marginTop: '10px' }}>
+                                {/* Simplify / Densify / Beautify / Reset */}
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginTop: '10px' }}>
                                     <button
                                         onClick={handleSimplify}
                                         disabled={!selectedAnn.points || selectedAnn.points.length <= 6}
                                         style={{
-                                            flex: 1,
                                             padding: '6px',
                                             background: '#2196F3',
                                             color: 'white',
@@ -1635,7 +1843,6 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                                     <button
                                         onClick={handleDensify}
                                         style={{
-                                            flex: 1,
                                             padding: '6px',
                                             background: '#9C27B0',
                                             color: 'white',
@@ -1649,10 +1856,27 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                                         Densify
                                     </button>
                                     <button
+                                        onClick={handleBeautify}
+                                        disabled={isProcessing}
+                                        style={{
+                                            padding: '6px',
+                                            background: 'linear-gradient(45deg, #FFD700, #FF8C00)',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '4px',
+                                            cursor: isProcessing ? 'not-allowed' : 'pointer',
+                                            fontSize: '12px',
+                                            fontWeight: 'bold',
+                                            gridColumn: 'span 2' // Full width
+                                        }}
+                                        title="Use AI to refine polygon shape (SAM)"
+                                    >
+                                        {isProcessing ? '✨ Refining...' : '✨ Beautify'}
+                                    </button>
+                                    <button
                                         onClick={handleReset}
                                         disabled={!selectedAnn.originalRawPoints}
                                         style={{
-                                            flex: 0.4,
                                             padding: '6px',
                                             background: '#607D8B',
                                             color: 'white',
@@ -1660,11 +1884,11 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                                             borderRadius: '4px',
                                             cursor: 'pointer',
                                             fontSize: '14px',
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                            gridColumn: 'span 2'
                                         }}
                                         title="Reset to Original"
                                     >
-                                        ↺
+                                        ↺ Reset
                                     </button>
                                 </div>
 
@@ -1689,27 +1913,27 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
 
 
                     </div>
+
+
+                    <SettingsModal
+                        isOpen={showSettings}
+                        onClose={() => setShowSettings(false)}
+                        availableModels={availableModels}
+                        selectedModel={selectedModel}
+                        setSelectedModel={setSelectedModel}
+                        confidenceThreshold={confidenceThreshold}
+                        setConfidenceThreshold={setConfidenceThreshold}
+                        enableAugmentation={enableAugmentation}
+                        setEnableAugmentation={setEnableAugmentation}
+                        filterText={filterText}
+                        setFilterText={setFilterText}
+                        textBoxConf={textBoxConf}
+                        setTextBoxConf={setTextBoxConf}
+                        textIou={textIou}
+                        setTextIou={setTextIou}
+                    />
                 </>
-            )
-            }
-            {/* Settings Modal */}
-            <SettingsModal
-                isOpen={showSettings}
-                onClose={() => setShowSettings(false)}
-                availableModels={availableModels}
-                selectedModel={selectedModel}
-                setSelectedModel={setSelectedModel}
-                confidenceThreshold={confidenceThreshold}
-                setConfidenceThreshold={setConfidenceThreshold}
-                enableAugmentation={enableAugmentation}
-                setEnableAugmentation={setEnableAugmentation}
-                filterText={filterText}
-                setFilterText={setFilterText}
-                textBoxConf={textBoxConf}
-                setTextBoxConf={setTextBoxConf}
-                textIou={textIou}
-                setTextIou={setTextIou}
-            />
+            )}
         </div>
     );
 };

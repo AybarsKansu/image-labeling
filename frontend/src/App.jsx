@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import './App.css';
 import ModelManagerModal from './components/ModelManagerModal';
 import TrainPanel from './components/TrainPanel';
-import AnnotationApp from '../pages/AnnotationApp'; // Check if this path logic holds or needs adjustment based on folder structure
+import AnnotationApp from './components/AnnotationApp';
 
 function App() {
   const [showModelManager, setShowModelManager] = useState(false);
