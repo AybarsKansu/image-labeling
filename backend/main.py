@@ -10,7 +10,7 @@ except ImportError:
     SAM = None # Fallback or handle error
     print("Warning: SAM not available in ultralytics.")
 
-from shapely.geometry import Polygon as ShapelyPolygon, MultiPolygon
+from shapely.geometry import Polygon as ShapelyPolygon, MultiPolygon, LineString
 from shapely.validation import make_valid
 
 
@@ -847,6 +847,32 @@ async def refine_polygon(
         print(f"Error in /api/refine-polygon: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+def extend_line(points_tuples, expansion=5000):
+    if len(points_tuples) < 2: return points_tuples
+    
+    try:
+        # Start
+        p0 = np.array(points_tuples[0])
+        p1 = np.array(points_tuples[1])
+        vec = p0 - p1
+        norm = np.linalg.norm(vec)
+        if norm > 0:
+            new_p0 = p0 + (vec / norm) * expansion
+            points_tuples[0] = tuple(new_p0)
+
+        # End
+        pn = np.array(points_tuples[-1])
+        pnm1 = np.array(points_tuples[-2])
+        vec = pn - pnm1
+        norm = np.linalg.norm(vec)
+        if norm > 0:
+            new_pn = pn + (vec / norm) * expansion
+            points_tuples[-1] = tuple(new_pn)
+    except Exception as e:
+        print(f"Extend line failed: {e}")
+        
+    return points_tuples
+
 @app.post("/api/edit-polygon-boolean")
 async def edit_polygon_boolean(
     target_points: str = Form(...), # JSON List [x,y,x,y...]
@@ -861,21 +887,35 @@ async def edit_polygon_boolean(
         t_pts = json.loads(target_points)
         c_pts = json.loads(cutter_points)
         
-        if len(t_pts) < 6 or len(c_pts) < 6:
-             return JSONResponse({"error": "Invalid polygon points"}, status_code=400)
+        if len(c_pts) < 4: # Line needs at least 2 points (4 coords)
+             return JSONResponse({"error": "Invalid cutter points"}, status_code=400)
 
         # Convert to [(x,y), (x,y)...]
         t_tuples = list(zip(t_pts[::2], t_pts[1::2]))
         c_tuples = list(zip(c_pts[::2], c_pts[1::2]))
         
         poly_target = ShapelyPolygon(t_tuples)
-        poly_cutter = ShapelyPolygon(c_tuples)
         
-        # Validation
+        # Knife Logic: Line String Buffer
+        if operation == "subtract":
+            # Smart Extend
+            c_tuples = extend_line(c_tuples)
+            
+            # Treat as LineString and Buffer
+            line_cutter = LineString(c_tuples)
+            poly_cutter = line_cutter.buffer(3) # 3 pixel width cut (~6px total)
+        else:
+            poly_cutter = ShapelyPolygon(c_tuples)
+        
+        # Validation & Cleanup
         if not poly_target.is_valid:
             poly_target = make_valid(poly_target)
         if not poly_cutter.is_valid:
             poly_cutter = make_valid(poly_cutter)
+            
+        # Buffer(0) trick to fix self-intersections
+        poly_target = poly_target.buffer(0)
+        poly_cutter = poly_cutter.buffer(0)
 
         # Perform Operation
         result = None
@@ -896,27 +936,27 @@ async def edit_polygon_boolean(
 
         if isinstance(result, ShapelyPolygon):
              # Simple Polygon
-             # extract coords
-             x, y = result.exterior.coords.xy
-             # interleave
-             flat = []
-             for i in range(len(x)):
-                 flat.append(x[i])
-                 flat.append(y[i])
-             final_polys.append(flat)
-             
-        elif isinstance(result, MultiPolygon):
-             for p in result.geoms:
-                 x, y = p.exterior.coords.xy
+             if result.area > 10: # Artifact filter
+                 x, y = result.exterior.coords.xy
                  flat = []
                  for i in range(len(x)):
                      flat.append(x[i])
                      flat.append(y[i])
                  final_polys.append(flat)
+             
+        elif isinstance(result, MultiPolygon):
+             for p in result.geoms:
+                 if p.area > 10: # Artifact filter
+                     x, y = p.exterior.coords.xy
+                     flat = []
+                     for i in range(len(x)):
+                         flat.append(x[i])
+                         flat.append(y[i])
+                     final_polys.append(flat)
         elif result.geom_type == 'GeometryCollection':
              # Might happen if diff leaves points/lines
              for geom in result.geoms:
-                 if geom.geom_type == 'Polygon':
+                 if geom.geom_type == 'Polygon' and geom.area > 10:
                      x, y = geom.exterior.coords.xy
                      flat = []
                      for i in range(len(x)):
@@ -1098,7 +1138,25 @@ async def segment_by_text(
              }, status_code=400)
              
         # Use SAM to predict with box prompts
-        sam_results = sam_model(img, bboxes=bboxes, verbose=False)
+        try:
+            # Ensure bboxes is a list of lists [[x1,y1,x2,y2], ...]
+            # boxes.xyxy is (N, 4) tensor or numpy
+            bboxes_list = bboxes.tolist() if hasattr(bboxes, 'tolist') else bboxes
+            
+            # If strictly single box flat list [x,y,x,y], nest it
+            if len(bboxes_list) > 0 and not isinstance(bboxes_list[0], list) and not isinstance(bboxes_list[0], (np.ndarray, type(bboxes))):
+                 bboxes_list = [bboxes_list]
+            
+            # Ultralytics SAM typically expects:
+            # - bboxes assigned as arg
+            # - shape: (N, 4)
+            
+            sam_results = sam_model(img, bboxes=bboxes_list, verbose=False)
+            
+        except Exception as sam_err:
+            print(f"SAM standard inference failed: {sam_err}. Trying fallback...")
+            # Fallback: predict() might handle it differently or its NOT a SAM model wrapped strictly
+            sam_results = sam_model.predict(img, bboxes=bboxes, verbose=False)
         
         detections = []
         if sam_results[0].masks:

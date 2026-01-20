@@ -253,6 +253,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                         label: 'unknown',
                         originalRawPoints: currentPolyPoints.flatMap(p => [p.x, p.y])
                     };
+                    addToHistory(annotations);
                     setAnnotations(prev => [...prev, newAnn]);
                     setCurrentPolyPoints([]);
                     setSelectedIndex(annotations.length); // Use current length (it will be index after add)
@@ -309,6 +310,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
         if (!imageObj) return;
 
         if (tool === 'eraser') {
+            addToHistory(annotations);
             setIsDrawing(true);
             return;
         }
@@ -330,9 +332,9 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
 
         if (tool === 'poly') return;
 
-        // Box, AI-box, Pen
+        // Box, AI-box, Pen, Knife
         setIsDrawing(true);
-        if (tool === 'pen') {
+        if (tool === 'pen' || tool === 'knife') {
             setCurrentPenPoints([pos.x, pos.y]);
         } else {
             // Start Box / AI Box with temp annotation
@@ -430,7 +432,14 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
         if (!isDrawing) return;
 
         if (tool === 'pen' || (tool === 'ai-box' && aiBoxMode === 'lasso') || tool === 'knife') {
-            setCurrentPenPoints([...currentPenPoints, pos.x, pos.y]);
+            // Optimization: Only add if distance > 5px (or 2px for smoother)
+            const lastX = currentPenPoints[currentPenPoints.length - 2];
+            const lastY = currentPenPoints[currentPenPoints.length - 1];
+            const dist = Math.sqrt(Math.pow(pos.x - lastX, 2) + Math.pow(pos.y - lastY, 2));
+
+            if (dist > 5) { // 5px threshold for smoother drawing (Smart Extend Request)
+                setCurrentPenPoints([...currentPenPoints, pos.x, pos.y]);
+            }
             return;
         }
 
@@ -469,6 +478,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                     type: 'poly',
                     points: currentPenPoints,
                     label: filterText || 'unknown',
+                    color: color,
                     originalRawPoints: [...currentPenPoints]
                 };
                 addToHistory(annotations);
@@ -518,20 +528,12 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
         }
 
         if (tool === 'knife') {
-            if (currentPenPoints.length > 6) {
+            if (currentPenPoints.length > 2) { // Need at least 2 points for a line
                 // 1. Identify Target
                 let targetIndex = selectedIndex;
 
-                // If nothing selected, try to find one that contains the first point of knife? 
-                // Or actually intersection is better.
-                // For now, let's stick to "Selected" or "First Intersecting" logic.
-                // Simple approach: Logic on Backend is purely boolean diff.
-                // We need to know WHICH shape to cut.
-                // If user selected one, we cut that one.
-
                 if (targetIndex === null) {
-                    // Try to find a shape that the knife stroke starts inside or intersects
-                    // Simple check: Is the first point of knife inside any poly?
+                    // Try to find a shape that the knife stroke starts inside
                     const startP = { x: currentPenPoints[0], y: currentPenPoints[1] };
                     targetIndex = getClickedShape(startP);
                 }
@@ -540,10 +542,10 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                     const targetAnn = annotations[targetIndex];
                     if (targetAnn.type === 'poly' || targetAnn.type === 'box') {
                         setIsProcessing(true);
+                        addToHistory(annotations); // Snapshot BEFORE processing/update
+
                         try {
                             const formData = new FormData();
-                            // target_points
-                            // If box, need to convert to points first if not already (it is stored as poly points usually)
                             formData.append('target_points', JSON.stringify(targetAnn.points));
                             formData.append('cutter_points', JSON.stringify(currentPenPoints));
                             formData.append('operation', 'subtract');
@@ -551,15 +553,12 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                             const res = await axios.post(`${API_URL}/edit-polygon-boolean`, formData);
 
                             if (res.data.polygons) {
-                                addToHistory(annotations);
-
                                 // Remove old target
                                 const newAnns = [...annotations];
                                 newAnns.splice(targetIndex, 1);
 
                                 // Add new parts
                                 res.data.polygons.forEach(polyPoints => {
-                                    // If a part is too small, maybe skip?
                                     if (polyPoints.length >= 6) {
                                         newAnns.push({
                                             id: crypto.randomUUID(),
@@ -576,7 +575,8 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                             }
                         } catch (err) {
                             console.error("Knife failed", err);
-                            alert("Knife operation failed");
+                            // alert("Knife operation failed"); 
+                            // Silent fail or toast better?
                         } finally {
                             setIsProcessing(false);
                         }
@@ -1501,7 +1501,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                             onContextMenu={(e) => e.evt.preventDefault()}
                             style={{
                                 background: '#000',
-                                cursor: tool === 'pan' ? 'grab' : (tool === 'eraser' ? 'crosshair' : 'default')
+                                cursor: tool === 'pan' ? 'grab' : (tool === 'eraser' ? 'crosshair' : (tool === 'knife' ? 'crosshair' : 'default'))
                             }}
                         >
                             <Layer>
@@ -1522,7 +1522,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
 
                                     {/* Render Annotations */}
                                     {annotations.map((ann, idx) => {
-                                        const color = stringToColor(ann.label || 'unknown');
+                                        const color = ann.color || stringToColor(ann.label || 'unknown');
                                         const isSelected = idx === selectedIndex;
 
                                         if (!ann.points || ann.points.length < 6 || ann.points.some(p => isNaN(p))) return null;
@@ -1644,9 +1644,9 @@ const AnnotationApp = ({ selectedModel, setSelectedModel }) => {
                                             strokeWidth={2}
                                             tension={0.5}
                                             lineCap="round"
-                                            dash={tool === 'ai-box' ? [4, 4] : undefined}
-                                            closed={tool === 'knife'} // Knife looks better closed as loops
-                                            fill={tool === 'knife' ? 'rgba(255, 0, 0, 0.2)' : undefined}
+                                            dash={(tool === 'ai-box' || tool === 'knife') ? [5, 5] : undefined}
+                                            closed={tool === 'knife' ? false : (tool === 'ai-box' ? true : false)}
+                                            fill={tool === 'knife' ? undefined : (tool === 'ai-box' ? 'rgba(0, 229, 255, 0.1)' : undefined)}
                                         />
                                     )}
 
