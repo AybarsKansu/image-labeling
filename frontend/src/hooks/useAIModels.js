@@ -6,7 +6,7 @@ import { API_URL } from '../constants/config';
  * useAIModels Hook
  * Manages AI models, training status, and modal visibility
  */
-export const useAIModels = (initialModel = 'yolov8m-seg.pt') => {
+export const useAIModels = (initialModel = 'yolov8m-seg.pt', textPrompt) => {
     // --- Model State ---
     const [availableModels, setAvailableModels] = useState([initialModel]);
     const [selectedModel, setSelectedModel] = useState(initialModel);

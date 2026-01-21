@@ -20,6 +20,8 @@ const MainToolbar = ({
     setEraserSize,
     confidenceThreshold,
     setConfidenceThreshold,
+    textPrompt,
+    setTextPrompt,
 
     // AI Models
     selectedModel,
@@ -116,6 +118,17 @@ const MainToolbar = ({
                     </div>
                 </div>
             )}
+
+            {/* Text Prompt Input - Always Visible for SAM/CLIP */}
+            <div className="toolbar-section">
+                <input
+                    type="text"
+                    className="text-prompt-input"
+                    placeholder="Class prompt (e.g., 'car', 'dog')"
+                    value={textPrompt}
+                    onChange={(e) => setTextPrompt(e.target.value)}
+                />
+            </div>
 
             {/* Eraser Size Slider */}
             {tool === 'eraser' && (

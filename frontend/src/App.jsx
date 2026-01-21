@@ -29,11 +29,14 @@ function App() {
   // Annotations (shapes, selection, history)
   const annotationsHook = useAnnotations();
 
+  // Text Prompt State (Managed at App level)
+  const [textPrompt, setTextPrompt] = useState('');
+
   // AI Models (model selection, training)
-  const aiModels = useAIModels('yolov8m-seg.pt');
+  const aiModels = useAIModels('yolov8m-seg.pt', textPrompt);
 
   // Draw tools (pen, box, knife, eraser, etc.)
-  const drawTools = useDrawTools(stage, annotationsHook);
+  const drawTools = useDrawTools(stage, annotationsHook, textPrompt);
 
   // Polygon modifiers (simplify, densify, beautify)
   const polygonMods = usePolygonModifiers(annotationsHook, stage);
@@ -52,6 +55,7 @@ function App() {
   const [trainBatchSize, setTrainBatchSize] = useState(16);
   const [trainBaseModel, setTrainBaseModel] = useState('yolov8m-seg.pt');
   const [trainError, setTrainError] = useState('');
+
 
   // ============================================
   // EVENT HANDLERS
@@ -206,6 +210,9 @@ function App() {
         setEraserSize={drawTools.setEraserSize}
         confidenceThreshold={drawTools.confidenceThreshold}
         setConfidenceThreshold={drawTools.setConfidenceThreshold}
+
+        textPrompt={textPrompt}
+        setTextPrompt={setTextPrompt}
         selectedModel={aiModels.selectedModel}
         onOpenModelManager={aiModels.actions.openModelManager}
         onOpenSettings={aiModels.actions.openSettings}

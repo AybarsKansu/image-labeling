@@ -101,7 +101,6 @@ const CanvasStage = ({
                     {/* Annotations */}
                     {filteredAnnotations.map((ann, i) => {
                         const isSelected = selectedIndex === i;
-                        const annColor = ann.color || stringToColor(ann.label || 'unknown');
 
                         // Validate points
                         if (!ann.points || ann.points.length < 4) return null;
@@ -112,17 +111,29 @@ const CanvasStage = ({
                         );
                         if (hasInvalidPoints) return null;
 
+                        // Determine if this was drawn with pen (should be open, no fill)
+                        const isPenDrawn = ann.isPenDrawn === true;
+
+                        // Get stroke color (from annotation or generate from label)
+                        const strokeColor = ann.color || stringToColor(ann.label || 'unknown');
+
+                        // Fill is stroke color with low opacity (10% normal, 30% selected)
+                        // Pen drawn shapes have no fill
+                        const fillColor = isPenDrawn ? null : (isSelected ? `${strokeColor}4D` : `${strokeColor}1A`);
+
                         return (
                             <React.Fragment key={ann.id || i}>
                                 {/* Polygon Line */}
                                 <Line
                                     points={ann.points}
-                                    stroke={annColor}
+                                    stroke={strokeColor}
                                     strokeWidth={isSelected ? 3 : 2}
-                                    fill={isSelected ? `${annColor}40` : `${annColor}20`}
-                                    closed={true}
+                                    fill={fillColor}
+                                    fillEnabled={!isPenDrawn}
+                                    closed={!isPenDrawn}
                                     lineCap="round"
                                     lineJoin="round"
+                                    hitStrokeWidth={20}
                                 />
 
                                 {/* Label */}
@@ -147,7 +158,7 @@ const CanvasStage = ({
                                             y={ann.points[pi + 1]}
                                             radius={5}
                                             fill="#fff"
-                                            stroke={annColor}
+                                            stroke={strokeColor}
                                             strokeWidth={2}
                                             draggable={true}
                                             onDragMove={(e) => onVertexDrag(e, i, pi)}

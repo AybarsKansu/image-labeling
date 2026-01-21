@@ -15,7 +15,7 @@ import { generateId } from '../utils/helpers';
  * useDrawTools Hook
  * Complex drawing/knife/eraser engine with all tool logic
  */
-export const useDrawTools = (stageHook, annotationsHook) => {
+export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
     const {
         stageRef,
         groupRef,
@@ -43,7 +43,6 @@ export const useDrawTools = (stageHook, annotationsHook) => {
     const [eraserSize, setEraserSize] = useState(ERASER_RADIUS);
     const [confidenceThreshold, setConfidenceThreshold] = useState(50);
     const [filterText, setFilterText] = useState('');
-    const [textPrompt, setTextPrompt] = useState('');
 
     // --- Drawing State ---
     const [isDrawing, setIsDrawing] = useState(false);
@@ -262,7 +261,8 @@ export const useDrawTools = (stageHook, annotationsHook) => {
                     points: currentPenPoints,
                     label: filterText || 'unknown',
                     color: color,
-                    originalRawPoints: [...currentPenPoints]
+                    originalRawPoints: [...currentPenPoints],
+                    isPenDrawn: true  // Mark as pen-drawn (no fill, open path)
                 };
                 const newIndex = addAnnotation(newAnn);
                 selectAnnotation(newIndex);
@@ -442,6 +442,11 @@ export const useDrawTools = (stageHook, annotationsHook) => {
 
     // --- Stage Click Handler (for Polygon tool) ---
     const handleStageClick = useCallback((e) => {
+        // Block right-click from placing points (reserved for panning)
+        if (e.evt && e.evt.button === 2) {
+            return;
+        }
+
         if (justFinishedDrawingRef.current) {
             justFinishedDrawingRef.current = false;
             return;
@@ -500,9 +505,19 @@ export const useDrawTools = (stageHook, annotationsHook) => {
     }, [annotations, setAnnotations]);
 
     // --- Detect All Handler ---
+    // Conditionally routes to /detect-all (YOLO) or /segment-by-text (SAM/CLIP)
     const handleDetectAll = useCallback(async (selectedModel) => {
         if (!imageFile) {
             alert('Please upload an image first');
+            return;
+        }
+
+        const hasTextPrompt = textPrompt && textPrompt.trim().length > 0;
+        const isSamModel = selectedModel && selectedModel.toLowerCase().includes('sam');
+
+        // VALIADTION: SAM requires a text prompt for "Detect All"
+        if (isSamModel && !hasTextPrompt) {
+            alert("SAM requires a text prompt for generic detection. Please enter a class name (e.g. 'car', 'person').");
             return;
         }
 
@@ -515,14 +530,21 @@ export const useDrawTools = (stageHook, annotationsHook) => {
             formData.append('model_name', selectedModel);
             formData.append('confidence', (confidenceThreshold / 100).toFixed(2));
 
-            const res = await axios.post(`${API_URL}/detect-all`, formData);
+            // Determine endpoint based on textPrompt
+            const endpoint = hasTextPrompt ? '/segment-by-text' : '/detect-all';
+
+            if (hasTextPrompt) {
+                formData.append('text_prompt', textPrompt.trim());
+            }
+
+            const res = await axios.post(`${API_URL}${endpoint}`, formData);
 
             if (res.data.detections?.length > 0) {
                 const newAnns = res.data.detections.map(d => ({
                     id: d.id || generateId(),
                     type: 'poly',
                     points: d.points,
-                    label: d.label || 'object',
+                    label: d.label || (hasTextPrompt ? textPrompt.trim() : 'object'),
                     originalRawPoints: d.points
                 }));
                 setAnnotations(prev => [...prev, ...newAnns]);
@@ -533,7 +555,7 @@ export const useDrawTools = (stageHook, annotationsHook) => {
         } finally {
             setIsProcessing(false);
         }
-    }, [imageFile, confidenceThreshold, annotations, addToHistory, setAnnotations]);
+    }, [imageFile, confidenceThreshold, textPrompt, annotations, addToHistory, setAnnotations]);
 
     return {
         // Tool State
@@ -543,7 +565,6 @@ export const useDrawTools = (stageHook, annotationsHook) => {
         eraserSize,
         confidenceThreshold,
         filterText,
-        textPrompt,
 
         // Drawing State
         isDrawing,
@@ -563,7 +584,6 @@ export const useDrawTools = (stageHook, annotationsHook) => {
         setEraserSize,
         setConfidenceThreshold,
         setFilterText,
-        setTextPrompt,
         setCurrentPolyPoints,
         setCurrentPenPoints,
         setTempAnnotation,
