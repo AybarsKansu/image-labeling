@@ -1,5 +1,8 @@
-path: /home/aybars_kansu_han/Desktop/first/vite-project/backend/dataset
+
+path: /home/aybars_kansu_han/Desktop/example/image-labeling/backend/dataset/processed
 train: images
 val: images
 names:
   0: bird
+  1: plane_wing
+  2: plane_body

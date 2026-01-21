@@ -28,9 +28,6 @@ export default function SettingsModal({
 
                 <div className="modal-content">
 
-
-
-
                     {/* Data Augmentation */}
                     <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '1rem', padding: '10px', background: '#1f2937', borderRadius: '6px' }}>
                         <input

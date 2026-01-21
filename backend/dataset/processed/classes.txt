@@ -1,0 +1,3 @@
+bird
+plane_wing
+plane_body
