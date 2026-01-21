@@ -1,0 +1,68 @@
+"""
+Image Labeling API - Main Entry Point.
+
+A modular FastAPI application for Computer Vision tasks:
+- YOLO object detection
+- SAM segmentation
+- Polygon editing and annotation
+- Dataset management and training
+
+Usage:
+    uvicorn app.main:app --reload
+"""
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.core.config import get_settings
+from app.core.events import lifespan
+from app.api.v1.router import router as v1_router
+
+
+def create_app() -> FastAPI:
+    """Application factory."""
+    settings = get_settings()
+    
+    app = FastAPI(
+        title="Image Labeling API",
+        description="Computer Vision API for object detection, segmentation, and annotation",
+        version="2.0.0",
+        lifespan=lifespan
+    )
+    
+    # CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
+    # Include API router
+    app.include_router(v1_router, prefix="/api")
+    
+    # Global exception handler
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        """Catch-all exception handler for unhandled errors."""
+        print(f"Unhandled exception: {exc}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={"error": "Internal server error", "detail": str(exc)}
+        )
+    
+    # Health check endpoint
+    @app.get("/health")
+    async def health_check():
+        """Health check endpoint."""
+        return {"status": "healthy"}
+    
+    return app
+
+
+# Create the application instance
+app = create_app()

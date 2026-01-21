@@ -1,5 +1,0 @@
-path: /home/aybars_kansu_han/Desktop/first/vite-project/backend/dataset
-train: images
-val: images
-names:
-  0: bird
