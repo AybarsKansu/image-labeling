@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import './App.css';
-import ModelManagerModal from './components/Modals/ModelManagerModal';
+import ModelManagerModal from './components/ModelManagerModal';
 import TrainPanel from './components/TrainPanel';
 import AnnotationApp from './components/AnnotationApp';
 
 function App() {
   const [showModelManager, setShowModelManager] = useState(false);
   const [showTrainPanel, setShowTrainPanel] = useState(false);
+
+  // In 2026, we want a premium feel.
+
   const [selectedModel, setSelectedModel] = useState('yolov8m-seg.pt');
 
   // Load available models locally if easier, or let App fetch initial list? 

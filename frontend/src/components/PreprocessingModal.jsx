@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import '../components.css';
+import './components.css';
 
 export default function PreprocessingModal({
     isOpen,
