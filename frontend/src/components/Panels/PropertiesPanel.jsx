@@ -83,7 +83,7 @@ const PropertiesPanel = ({
                     <div className="modifier-buttons">
                         <button
                             className="modifier-btn"
-                            onClick={onSimplify}
+                            onClick={() => onSimplify()}
                             disabled={!canModify || isProcessing}
                             title="Reduce points (RDP algorithm)"
                         >
@@ -91,7 +91,7 @@ const PropertiesPanel = ({
                         </button>
                         <button
                             className="modifier-btn"
-                            onClick={onDensify}
+                            onClick={() => onDensify()}
                             disabled={!canModify || isProcessing}
                             title="Add midpoints"
                         >
