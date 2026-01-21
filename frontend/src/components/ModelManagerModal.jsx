@@ -4,6 +4,7 @@ import './components.css';
 const API_URL = 'http://localhost:8000/api';
 
 const officialModels = [
+    // --- SAM Series (Best for AI Box / Click Segment) ---
     {
         id: 'sam2.1_l.pt',
         name: 'SAM 2.1 Large',
@@ -19,9 +20,11 @@ const officialModels = [
     {
         id: 'sam2.1_t.pt',
         name: 'SAM 2.1 Tiny',
-        desc: 'Ultra Fast',
+        desc: 'Ultra Fast (Low VRAM)',
         type: 'sam'
     },
+
+    // --- YOLO Series (Best for Detect All / Auto-Label) ---
     {
         id: 'yolo11x-seg.pt',
         name: 'YOLO11x Seg',
@@ -40,6 +43,7 @@ const officialModels = [
         desc: 'Medium. Good balance if X is too slow.',
         type: 'yolo'
     },
+    // Keep legacy v8 just in case
     {
         id: 'yolov8n-seg.pt',
         name: 'YOLOv8 Nano (Legacy)',

@@ -9,8 +9,9 @@ import PreprocessingModal from './PreprocessingModal';
 const API_URL = 'http://localhost:8000/api';
 const ERASER_RADIUS = 20;
 
+
+
 // --- Utils ---
-// to give each different label a unique color
 const stringToColor = (str) => {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -24,18 +25,17 @@ const stringToColor = (str) => {
     return color;
 };
 
-// --- Distance Point to Segment ---
+// --- Helper: Distance Point to Segment ---
 const distanceToSegment = (p, v, w) => {
     const l2 = Math.pow(v.x - w.x, 2) + Math.pow(v.y - w.y, 2);
     if (l2 === 0) return Math.sqrt(Math.pow(p.x - v.x, 2) + Math.pow(p.y - v.y, 2));
-    // projection of point p on line segment vw
     let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
     t = Math.max(0, Math.min(1, t));
     const proj = { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) };
     return Math.sqrt(Math.pow(p.x - proj.x, 2) + Math.pow(p.y - proj.y, 2));
 };
 
-// --- Bounding Box Intersection ---
+// --- Helper: Bounding Box Intersection ---
 const doBoxesIntersect = (box1, box2) => {
     return (
         box1.x < box2.x + box2.width &&
@@ -45,7 +45,7 @@ const doBoxesIntersect = (box1, box2) => {
     );
 };
 
-// --- Get Poly Bounds ---
+// --- Helper: Get Poly Bounds ---
 const getPolyBounds = (points) => {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (let i = 0; i < points.length; i += 2) {
@@ -56,7 +56,7 @@ const getPolyBounds = (points) => {
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 };
 
-// --- Get Line Bounds ---
+// --- Helper: Get Line Bounds ---
 const getLineBounds = (points) => {
     // Exact same logic as poly bounds
     return getPolyBounds(points);
@@ -81,20 +81,26 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
     // --- State: Tools ---
     const [tool, setTool] = useState('select'); // select, pan, box, poly, ai-box, pen
     const [aiBoxMode, setAiBoxMode] = useState('rect'); // 'rect' | 'lasso'
-    const [color, setColor] = useState('#000000ff'); // Tool color
+    const [color, setColor] = useState('#205a09ff'); // Tool color
     const [eraserSize, setEraserSize] = useState(20); // Eraser Radius
 
     const [enableAugmentation, setEnableAugmentation] = useState(false); // Augmentation Checkbox
 
     // --- State: AI Config ---
+    // --- State: AI Config ---
     const [availableModels, setAvailableModels] = useState(['yolov8m-seg.pt']);
+    // const [selectedModel, setSelectedModel] = useState('yolov8m-seg.pt'); // REMOVED: Managed by App.jsx
     const [confidenceThreshold, setConfidenceThreshold] = useState(50); // 0-100%
 
     const [isDrawing, setIsDrawing] = useState(false);
     const [currentPolyPoints, setCurrentPolyPoints] = useState([]);
     const [currentPenPoints, setCurrentPenPoints] = useState([]); // [x, y, x, y...]
 
+    // ... (rest of state)
     const [trainingStatus, setTrainingStatus] = useState({ is_training: false, message: 'Idle' });
+
+
+
 
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
     const [filterText, setFilterText] = useState('');
@@ -155,8 +161,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
     // --- Training Status Polling ---
     useEffect(() => {
         let interval;
-        // Poll if modal is open OR if training is active (to show mini-progress)
-        if (showTrainModal || trainingStatus.is_training) {
+        if (showTrainModal) {
             interval = setInterval(() => {
                 axios.get(`${API_URL}/training-status`).then(res => {
                     setTrainingStatus(res.data);
@@ -164,18 +169,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
             }, 1000);
         }
         return () => clearInterval(interval);
-    }, [showTrainModal, trainingStatus.is_training]);
-
-    const handleCancelTraining = () => {
-        if (window.confirm("Are you sure you want to stop the training?")) {
-            axios.post(`${API_URL}/cancel-training`)
-                .then(res => {
-                    // Force a status update immediately to reflect change quicker
-                    setTrainingStatus(prev => ({ ...prev, message: "Cancelling..." }));
-                })
-                .catch(err => alert("Failed to cancel: " + err.message));
-        }
-    };
+    }, [showTrainModal]);
 
     // --- Image Fit on Load ---
     useEffect(() => {
@@ -207,7 +201,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
-    // --- Tool Change Reset ---
+    // --- Tool Change Reset (Bug 1 Fix) ---
     useEffect(() => {
         setCurrentPolyPoints([]);
         setTempAnnotation(null);
@@ -215,7 +209,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
         setIsDrawing(false);
     }, [tool]);
 
-    // --- Keyboard Listeners (Esc)---
+    // --- Keyboard Listeners (Esc) (Bug 1 Fix) ---
     useEffect(() => {
         const handleKeyDown = (e) => {
             if (e.key === 'Escape') {
@@ -237,7 +231,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [tool, currentPolyPoints.length, selectedIndex, isDrawing]);
 
-    // --- Zoom & Pan Logic ---
+    // --- Zoom & Pan Logic (Bug Fix / Feature) ---
     const handleWheel = (e) => {
         e.evt.preventDefault();
         const stage = stageRef.current;
@@ -277,7 +271,8 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
             setSelectedIndex(null);
             setCurrentPolyPoints([]);
             setTempAnnotation(null);
-            setHistory([]);
+            setHistory([]); // Clear history
+            // Fix Bug B: Reset input to allow re-selecting same file
             e.target.value = '';
         }
     };
@@ -290,7 +285,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
         }
     }, [imageUrl]);
 
-    // --- Get Relative Pointer Position with Pan/Zoom ---
+    // --- Helper: Get Relative Pointer Position with Pan/Zoom ---
     const getRelativePointerPosition = () => {
         if (!groupRef.current) return { x: 0, y: 0 };
         const transform = groupRef.current.getAbsoluteTransform().copy();
@@ -300,7 +295,6 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
     };
 
     // --- Point in Polygon Test ---
-    // ray casting algorithm -> if it intersects odd number of times, it is inside; otherwise it is outside
     const pointInPolygon = (point, polygon) => {
         const x = point.x, y = point.y;
         let inside = false;
@@ -332,7 +326,7 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
 
     // --- Stage Click Handler ---
     const handleStageClick = (e) => {
-        // If we just finished drawing, do nothing (don't deselect the new shape)
+        // If we just finished drawing, do NOTHING (don't deselect the new shape)
         if (justFinishedDrawingRef.current) {
             justFinishedDrawingRef.current = false;
             return;
@@ -358,17 +352,21 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
                     addToHistory(annotations);
                     setAnnotations(prev => [...prev, newAnn]);
                     setCurrentPolyPoints([]);
-                    setSelectedIndex(annotations.length);
+                    setSelectedIndex(annotations.length); // Use current length (it will be index after add)
                     justFinishedDrawingRef.current = true;
                     return;
                 }
             }
             setCurrentPolyPoints([...currentPolyPoints, { x: pos.x, y: pos.y }]);
         } else if (tool === 'eraser') {
+            // Eraser logic handled in onClick of shapes mostly, but if stage clicked verify nothing happens or deselect
             setSelectedIndex(null);
         } else {
+            // Normal selection logic
             const clickedIndex = getClickedShape(pos);
             if (clickedIndex !== null) {
+                // Modified: Eraser acts as brush, so specific clicking behavior removed here.
+                // Just Select.
                 setSelectedIndex(clickedIndex);
                 setSelectedLabel(annotations[clickedIndex].label || '');
             } else {
@@ -447,7 +445,8 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
         }
     };
 
-    // --- Add to History ---
+    // --- Helper: Add to History ---
+    // --- Helper: Add to History ---
     const addToHistory = (currentAnns) => {
         // Deep copy to ensure no reference issues
         const snapshot = JSON.parse(JSON.stringify(currentAnns));
@@ -1604,63 +1603,22 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
                             </button>
 
 
-                            {trainingStatus.is_training || (trainingStatus.message && (trainingStatus.message.includes("Error") || trainingStatus.message.includes("Cancelli"))) ? (
-                                <div style={{
-                                    display: 'flex', alignItems: 'center', gap: '8px',
-                                    background: '#333', padding: '4px 8px', borderRadius: '4px',
-                                    border: `1px solid ${(trainingStatus.message || "").includes("Error") ? '#ef4444' : '#444'}`,
+                            <button
+                                onClick={() => setShowTrainModal(true)}
+                                style={{
+                                    background: 'linear-gradient(45deg, #ea580c, #d97706)',
+                                    color: 'white',
+                                    border: 'none',
+                                    padding: '8px 12px',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontWeight: 'bold',
                                     marginRight: '10px'
-                                }}>
-
-                                    <div
-                                        onClick={() => setShowTrainModal(true)}
-                                        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}
-                                        title="Click to open detailed view"
-                                    >
-                                        {(trainingStatus.message || "").includes("Error") ? (
-                                            <span style={{ color: '#ef4444', fontSize: '14px' }}>⚠️</span>
-                                        ) : (
-                                            <div className="mini-spinner" style={{
-                                                width: '12px', height: '12px',
-                                                border: '2px solid #555', borderTop: '2px solid #ea580c',
-                                                borderRadius: '50%', animation: 'spin 1s linear infinite'
-                                            }}></div>
-                                        )}
-                                        <span style={{ fontSize: '11px', color: (trainingStatus.message || "").includes("Error") ? '#ef4444' : '#ccc' }}>
-                                            {(trainingStatus.message || "").includes("Error") ? "Error" : `${Math.round((trainingStatus.progress || 0) * 100)}%`}
-                                        </span>
-                                    </div>
-
-                                    <button
-                                        onClick={handleCancelTraining}
-                                        style={{
-                                            background: '#ef4444', color: 'white', border: 'none',
-                                            padding: '2px 6px', borderRadius: '2px', cursor: 'pointer', fontSize: '10px', fontWeight: 'bold',
-                                            display: (trainingStatus.message || "").includes("Error") ? 'none' : 'block'
-                                        }}
-                                        title="Stop Training"
-                                    >
-                                        ■
-                                    </button>
-                                </div>
-                            ) : (
-                                <button
-                                    onClick={() => setShowTrainModal(true)}
-                                    style={{
-                                        background: 'linear-gradient(45deg, #ea580c, #d97706)',
-                                        color: 'white',
-                                        border: 'none',
-                                        padding: '8px 12px',
-                                        borderRadius: '4px',
-                                        cursor: 'pointer',
-                                        fontWeight: 'bold',
-                                        marginRight: '10px'
-                                    }}
-                                    title="Train Model"
-                                >
-                                    🚂 Train
-                                </button>
-                            )}
+                                }}
+                                title="Train Model"
+                            >
+                                🚂 Train
+                            </button>
                             <button
                                 onClick={handleUndo}
                                 disabled={history.length === 0}
@@ -2306,7 +2264,8 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
 
                             axios.post(`${API_URL}/train-model`, formData)
                                 .then(res => {
-                                    setTrainingStatus(prev => ({ ...prev, is_training: true, message: 'Starting...' }));
+                                    alert('Training Started! ' + res.data.message);
+                                    setShowTrainModal(false);
                                     // Start polling status or just rely on status text
                                 })
                                 .catch(err => {
@@ -2314,8 +2273,6 @@ const AnnotationApp = ({ selectedModel, setSelectedModel, onOpenModelManager }) 
                                     console.error(err);
                                 });
                         }}
-                        onCancel={handleCancelTraining}
-                        trainingStatus={trainingStatus}
                     />
                 </>
             )

@@ -42,10 +42,8 @@ TRAINING_STATUS = {
     "progress": 0.0,
     "message": "Idle",
     "epoch": 0,
-    "epoch": 0,
     "total_epochs": 0
 }
-STOP_TRAINING = False
 
 def scan_models():
     """Scans for .pt files, loads SAM/YOLO, moves to CUDA."""
@@ -362,8 +360,7 @@ def preprocess_dataset(params: dict):
 
 # --- Training Background Task ---
 def train_model_task(base_model_name: str, epochs: int, batch_size: int, preprocess_params: dict = None):
-    global TRAINING_STATUS, STOP_TRAINING
-    STOP_TRAINING = False
+    global TRAINING_STATUS
     TRAINING_STATUS["is_training"] = True
     TRAINING_STATUS["progress"] = 0.0
     TRAINING_STATUS["epoch"] = 0
@@ -427,10 +424,6 @@ names:
         
         # Custom Callback for Progress
         def on_train_epoch_end(trainer):
-            global STOP_TRAINING
-            if STOP_TRAINING:
-                raise Exception("Training Cancelled by User")
-            
             TRAINING_STATUS["epoch"] = trainer.epoch + 1
             # 0.3 to 1.0 is training part (0.0-0.3 is preprocessing)
             # trainer.epoch is 0-indexed
@@ -492,10 +485,7 @@ names:
 
 
     except Exception as e:
-        if str(e) == "Training Cancelled by User":
-            TRAINING_STATUS["message"] = "Cancelled by User"
-        else:
-            TRAINING_STATUS["message"] = f"Error: {str(e)}"
+        TRAINING_STATUS["message"] = f"Error: {e}"
         print(f"Training Error: {e}")
     finally:
         TRAINING_STATUS["is_training"] = False
@@ -595,12 +585,6 @@ async def train_model(
     background_tasks.add_task(train_model_task, base_model, epochs, batch_size, p_params)
     
     return JSONResponse({"success": True, "message": "Preprocessing & Training started"})
-
-@app.post("/api/cancel-training")
-async def cancel_training():
-    global STOP_TRAINING
-    STOP_TRAINING = True
-    return JSONResponse({"success": True, "message": "Cancellation requested."})
 
 # --- Tiled Inference Helpers ---
 def get_slices(img_h, img_w, tile_size=640, overlap=0.2):
