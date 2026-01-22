@@ -36,6 +36,7 @@ const CanvasStage = ({
     onMouseDown,
     onMouseMove,
     onMouseUp,
+    onDblClick,
     onVertexDrag,
     onContextMenu
 }) => {
@@ -69,6 +70,7 @@ const CanvasStage = ({
             height={stageSize.height}
             onWheel={onWheel}
             onClick={onClick}
+            onDblClick={onDblClick}
             onMouseDown={onMouseDown}
             onMouseMove={onMouseMove}
             onMouseUp={onMouseUp}
@@ -186,21 +188,85 @@ const CanvasStage = ({
                     {/* Polygon in progress */}
                     {currentPolyPoints.length > 0 && (
                         <>
+                            {/* Dynamic Fill Preview (CVAT Style) */}
+                            {/* Shows the potential polygon area including the current mouse position */}
+                            {tool === 'poly' && mousePos && (
+                                <Line
+                                    points={[...currentPolyPoints.flatMap(p => [p.x, p.y]), mousePos.x, mousePos.y]}
+                                    strokeEnabled={false}
+                                    fill={color}
+                                    opacity={0.2} // Low opacity for preview
+                                    closed={true}
+                                />
+                            )}
+
+                            {/* Static lines between placed points */}
                             <Line
                                 points={currentPolyPoints.flatMap(p => [p.x, p.y])}
-                                stroke="#ffff00"
+                                stroke={color} // Use tool color
                                 strokeWidth={2}
-                                dash={[5, 5]}
+                                lineCap="round"
+                                lineJoin="round"
                             />
+
+                            {/* Rubber-band guide line (last point -> mouse) */}
+                            {tool === 'poly' && mousePos && (
+                                <Line
+                                    points={[
+                                        currentPolyPoints[currentPolyPoints.length - 1].x,
+                                        currentPolyPoints[currentPolyPoints.length - 1].y,
+                                        mousePos.x,
+                                        mousePos.y
+                                    ]}
+                                    stroke={color}
+                                    strokeWidth={2}
+                                    dash={[6, 3]}
+                                    opacity={0.7}
+                                    lineCap="round"
+                                />
+                            )}
+
+                            {/* Closing preview line (when near start point) */}
+                            {tool === 'poly' && mousePos && currentPolyPoints.length >= 3 && (
+                                (() => {
+                                    const firstPt = currentPolyPoints[0];
+                                    const dist = Math.sqrt(
+                                        Math.pow(mousePos.x - firstPt.x, 2) +
+                                        Math.pow(mousePos.y - firstPt.y, 2)
+                                    );
+                                    if (dist < 15) {
+                                        return (
+                                            <Line
+                                                points={[
+                                                    currentPolyPoints[currentPolyPoints.length - 1].x,
+                                                    currentPolyPoints[currentPolyPoints.length - 1].y,
+                                                    firstPt.x,
+                                                    firstPt.y
+                                                ]}
+                                                stroke="#00ff00"
+                                                strokeWidth={2}
+                                                dash={[4, 2]}
+                                                opacity={0.9}
+                                            />
+                                        );
+                                    }
+                                    return null;
+                                })()
+                            )}
+
+                            {/* Anchor dots at each vertex - All visible (CVAT Style) */}
                             {currentPolyPoints.map((pt, i) => (
                                 <Circle
                                     key={`poly-pt-${i}`}
                                     x={pt.x}
                                     y={pt.y}
-                                    radius={i === 0 ? 8 : 4}
-                                    fill={i === 0 ? '#ff0000' : '#ffff00'}
-                                    stroke="#fff"
+                                    radius={4} // Visible white dots
+                                    fill="#ffffff"
+                                    stroke="#888888"
                                     strokeWidth={1}
+                                    shadowColor="#000"
+                                    shadowBlur={2}
+                                    shadowOpacity={0.3}
                                 />
                             ))}
                         </>

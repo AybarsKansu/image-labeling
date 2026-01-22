@@ -38,7 +38,6 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
 
     // --- Tool State ---
     const [tool, setTool] = useState('select'); // select, pan, box, poly, ai-box, pen, knife, eraser
-    const [aiBoxMode, setAiBoxMode] = useState('rect'); // 'rect' | 'lasso'
     const [color, setColor] = useState('#205a09ff');
     const [eraserSize, setEraserSize] = useState(ERASER_RADIUS);
     const [confidenceThreshold, setConfidenceThreshold] = useState(50);
@@ -78,6 +77,32 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
         setTempAnnotation(null);
         setIsDrawing(false);
     }, []);
+
+    // --- Undo Last Polygon Point (CVAT-style) ---
+    const undoLastPolyPoint = useCallback(() => {
+        if (currentPolyPoints.length > 0) {
+            setCurrentPolyPoints(prev => prev.slice(0, -1));
+        }
+    }, [currentPolyPoints.length]);
+
+    // --- Close Polygon (CVAT-style) ---
+    const closePolygon = useCallback(() => {
+        if (currentPolyPoints.length >= 3) {
+            const newAnn = {
+                id: generateId(),
+                type: 'poly',
+                points: currentPolyPoints.flatMap(p => [p.x, p.y]),
+                label: 'unknown',
+                originalRawPoints: currentPolyPoints.flatMap(p => [p.x, p.y])
+            };
+            const newIndex = addAnnotation(newAnn);
+            setCurrentPolyPoints([]);
+            selectAnnotation(newIndex);
+            justFinishedDrawingRef.current = true;
+            setTool('select');
+        }
+    }, [currentPolyPoints, addAnnotation, selectAnnotation]);
+
 
     // --- Change Tool (with reset) ---
     const changeTool = useCallback((newTool) => {
@@ -210,8 +235,8 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
 
         if (!isDrawing) return;
 
-        // Pen, AI Lasso, Knife
-        if (tool === 'pen' || (tool === 'ai-box' && aiBoxMode === 'lasso') || tool === 'knife') {
+        // Pen, AI Lasso (Removed), Knife
+        if (tool === 'pen' || tool === 'knife') {
             const lastX = currentPenPoints[currentPenPoints.length - 2];
             const lastY = currentPenPoints[currentPenPoints.length - 1];
             const dist = Math.sqrt(Math.pow(pos.x - lastX, 2) + Math.pow(pos.y - lastY, 2));
@@ -222,8 +247,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
             return;
         }
 
-        // Box, AI Box (rect mode)
-        if ((tool === 'box' || (tool === 'ai-box' && aiBoxMode === 'rect')) && tempAnnotation) {
+        if ((tool === 'box' || tool === 'ai-box') && tempAnnotation) {
             const sx = startPosRef.current.x;
             const sy = startPosRef.current.y;
 
@@ -235,7 +259,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
                 type: 'poly'
             });
         }
-    }, [isDrawing, tool, aiBoxMode, stageRef, panImage, getRelativePointerPosition, eraserSize, imageLayout.scale, annotations, setAnnotations, currentPenPoints, tempAnnotation]);
+    }, [isDrawing, tool, stageRef, panImage, getRelativePointerPosition, eraserSize, imageLayout.scale, annotations, setAnnotations, currentPenPoints, tempAnnotation]);
 
     // --- Mouse Up Handler ---
     const handleMouseUp = useCallback(async (selectedModel) => {
@@ -272,41 +296,8 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
             return;
         }
 
-        // AI Lasso
-        if (tool === 'ai-box' && aiBoxMode === 'lasso') {
-            if (currentPenPoints.length > 6 && imageFile) {
-                setIsProcessing(true);
-                try {
-                    const formData = new FormData();
-                    formData.append('file', imageFile);
-                    formData.append('points_json', JSON.stringify(currentPenPoints));
-                    formData.append('model_name', selectedModel);
-                    formData.append('confidence', (confidenceThreshold / 100).toFixed(2));
+        // AI Lasso (Removed)
 
-                    const res = await axios.post(`${API_URL}/segment-lasso`, formData);
-
-                    if (res.data.detections?.length > 0) {
-                        const newAnns = res.data.detections.map(d => ({
-                            id: d.id || generateId(),
-                            type: 'poly',
-                            points: d.points,
-                            label: d.label || 'object',
-                            suggestions: res.data.suggestions || [],
-                            originalRawPoints: d.points
-                        }));
-                        const lastIndex = addAnnotations(newAnns);
-                        selectAnnotation(lastIndex);
-                        justFinishedDrawingRef.current = true;
-                    }
-                } catch (err) {
-                    console.error('AI Lasso Failed', err);
-                } finally {
-                    setIsProcessing(false);
-                }
-            }
-            setCurrentPenPoints([]);
-            return;
-        }
 
         // Knife Tool
         if (tool === 'knife') {
@@ -388,7 +379,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
         }
 
         // AI Box Tool
-        if (tool === 'ai-box' && aiBoxMode === 'rect') {
+        if (tool === 'ai-box') {
             if (!tempAnnotation || tempAnnotation.width < 5 || tempAnnotation.height < 5) {
                 setTempAnnotation(null);
                 return;
@@ -438,7 +429,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
                 setTempAnnotation(null);
             }
         }
-    }, [isDrawing, tool, aiBoxMode, stageRef, currentPenPoints, tempAnnotation, filterText, color, imageFile, confidenceThreshold, textPrompt, annotations, addAnnotation, addAnnotations, selectAnnotation, spliceAndInsert]);
+    }, [isDrawing, tool, stageRef, currentPenPoints, tempAnnotation, filterText, color, imageFile, confidenceThreshold, textPrompt, annotations, addAnnotation, addAnnotations, selectAnnotation, spliceAndInsert]);
 
     // --- Stage Click Handler (for Polygon tool) ---
     const handleStageClick = useCallback((e) => {
@@ -602,7 +593,6 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
     return {
         // Tool State
         tool,
-        aiBoxMode,
         color,
         eraserSize,
         confidenceThreshold,
@@ -621,7 +611,6 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
 
         // Setters
         setTool: changeTool,
-        setAiBoxMode,
         setColor,
         setEraserSize,
         setConfidenceThreshold,
@@ -639,6 +628,8 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
         handleVertexDrag,
         handleDetectAll,
         resetToolState,
+        undoLastPolyPoint,
+        closePolygon,
 
         // Helpers
         getClickedShape

@@ -14,8 +14,6 @@ const MainToolbar = ({
     // Tool state
     tool,
     setTool,
-    aiBoxMode,
-    setAiBoxMode,
     eraserSize,
     setEraserSize,
     confidenceThreshold,
@@ -99,25 +97,7 @@ const MainToolbar = ({
                 ))}
             </div>
 
-            {/* AI Box Mode Toggle */}
-            {tool === 'ai-box' && (
-                <div className="toolbar-section">
-                    <div className="toggle-group">
-                        <button
-                            className={`toggle-btn ${aiBoxMode === 'rect' ? 'active' : ''}`}
-                            onClick={() => setAiBoxMode('rect')}
-                        >
-                            Box
-                        </button>
-                        <button
-                            className={`toggle-btn ${aiBoxMode === 'lasso' ? 'active' : ''}`}
-                            onClick={() => setAiBoxMode('lasso')}
-                        >
-                            Lasso
-                        </button>
-                    </div>
-                </div>
-            )}
+
 
             {/* Text Prompt Input - Always Visible for SAM/CLIP */}
             <div className="toolbar-section">

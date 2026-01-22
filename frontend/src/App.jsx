@@ -117,6 +117,15 @@ function App() {
     await drawTools.handleMouseUp(aiModels.selectedModel);
   }, [drawTools, aiModels.selectedModel]);
 
+  // Handle double-click (close polygon - CVAT-style)
+  // Disabled auto-close on double click to prevent accidental closing when clicking fast
+  const handleDoubleClick = useCallback(() => {
+    // if (drawTools.tool === 'poly' && drawTools.currentPolyPoints.length >= 3) {
+    //   drawTools.closePolygon();
+    // }
+  }, []);
+
+
   // Handle label change
   const handleLabelChange = useCallback((newLabel) => {
     annotationsHook.updateLabel(newLabel);
@@ -167,6 +176,26 @@ function App() {
         }
       }
 
+      // Enter key - close polygon (CVAT-style)
+      if (e.key === 'Enter' && drawTools.tool === 'poly' && drawTools.currentPolyPoints.length >= 3) {
+        e.preventDefault();
+        drawTools.closePolygon();
+      }
+
+      // Backspace/Delete - undo last point when drawing polygon, else delete annotation
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // If actively drawing a polygon, undo last point
+        if (drawTools.tool === 'poly' && drawTools.currentPolyPoints.length > 0) {
+          e.preventDefault();
+          drawTools.undoLastPolyPoint();
+          return;
+        }
+        // Otherwise, delete selected annotation
+        if (annotationsHook.selectedIndex !== null) {
+          annotationsHook.deleteSelected();
+        }
+      }
+
       // Undo (Ctrl+Z)
       if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
@@ -177,13 +206,6 @@ function App() {
       if ((e.ctrlKey && e.shiftKey && e.key === 'z') || (e.ctrlKey && e.key === 'y')) {
         e.preventDefault();
         annotationsHook.handleRedo();
-      }
-
-      // Delete
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (annotationsHook.selectedIndex !== null) {
-          annotationsHook.deleteSelected();
-        }
       }
     };
 
@@ -204,8 +226,6 @@ function App() {
         onCloseImage={handleCloseImage}
         tool={drawTools.tool}
         setTool={drawTools.setTool}
-        aiBoxMode={drawTools.aiBoxMode}
-        setAiBoxMode={drawTools.setAiBoxMode}
         eraserSize={drawTools.eraserSize}
         setEraserSize={drawTools.setEraserSize}
         confidenceThreshold={drawTools.confidenceThreshold}
@@ -250,6 +270,7 @@ function App() {
         onMouseDown={handleMouseDown}
         onMouseMove={drawTools.handleMouseMove}
         onMouseUp={handleMouseUp}
+        onDblClick={handleDoubleClick}
         onVertexDrag={drawTools.handleVertexDrag}
       />
 
