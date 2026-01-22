@@ -15,7 +15,7 @@ import { generateId } from '../utils/helpers';
  * useDrawTools Hook
  * Complex drawing/knife/eraser engine with all tool logic
  */
-export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
+export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedModel, currentParams) => {
     const {
         stageRef,
         groupRef,
@@ -40,7 +40,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
     const [tool, setTool] = useState('select'); // select, pan, box, poly, ai-box, pen, knife, eraser
     const [color, setColor] = useState('#205a09ff');
     const [eraserSize, setEraserSize] = useState(ERASER_RADIUS);
-    const [confidenceThreshold, setConfidenceThreshold] = useState(50);
+
     const [filterText, setFilterText] = useState('');
 
     // --- Drawing State ---
@@ -111,7 +111,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
     }, [resetToolState]);
 
     // --- Mouse Down Handler ---
-    const handleMouseDown = useCallback((e, selectedModel) => {
+    const handleMouseDown = useCallback((e) => {
         // Right Click Pan
         if (e.evt.button === 2) {
             isRightPanningRef.current = true;
@@ -255,7 +255,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
     }, [isDrawing, tool, stageRef, panImage, getRelativePointerPosition, eraserSize, imageLayout.scale, annotations, setAnnotations, currentPenPoints, tempAnnotation]);
 
     // --- Mouse Up Handler ---
-    const handleMouseUp = useCallback(async (selectedModel) => {
+    const handleMouseUp = useCallback(async () => {
         // End Right-Click Pan
         if (isRightPanningRef.current) {
             isRightPanningRef.current = false;
@@ -395,7 +395,19 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
                     tempAnnotation.height
                 ]));
                 formData.append('model_name', selectedModel);
-                formData.append('confidence', (confidenceThreshold / 100).toFixed(2));
+
+                // Use dynamic params or defaults
+                const conf = currentParams?.conf ?? 0.25;
+                formData.append('confidence', conf);
+
+                if (currentParams?.box_padding !== undefined) {
+                    formData.append('box_padding', currentParams.box_padding);
+                }
+
+                if (currentParams?.use_sam_hq !== undefined) {
+                    formData.append('use_hq', currentParams.use_sam_hq);
+                }
+
                 if (textPrompt) {
                     formData.append('text_prompt', textPrompt);
                 }
@@ -424,7 +436,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
                 setTempAnnotation(null);
             }
         }
-    }, [isDrawing, tool, stageRef, currentPenPoints, tempAnnotation, filterText, color, imageFile, confidenceThreshold, textPrompt, annotations, addAnnotation, addAnnotations, selectAnnotation, spliceAndInsert]);
+    }, [isDrawing, tool, stageRef, currentPenPoints, tempAnnotation, filterText, color, imageFile, textPrompt, annotations, addAnnotation, addAnnotations, selectAnnotation, spliceAndInsert, selectedModel, currentParams]);
 
     // --- Stage Click Handler (for Polygon tool) ---
     const handleStageClick = useCallback((e) => {
@@ -497,7 +509,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
 
     // --- Detect All Handler ---
     // Conditionally routes to /detect-all (YOLO) or /segment-by-text (SAM/CLIP)
-    const handleDetectAll = useCallback(async (selectedModel) => {
+    const handleDetectAll = useCallback(async () => {
         if (!imageFile) {
             alert('Please upload an image first');
             return;
@@ -531,6 +543,11 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
             return;
         }
 
+        if (isWorldModel && !hasTextPrompt) {
+            alert("Yolo World requires a text prompt for generic detection. Please enter a class name (e.g. 'car', 'person').");
+            return;
+        }
+
         setIsProcessing(true);
         addToHistory(annotations);
 
@@ -548,16 +565,22 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
                 // --- SCENARIO A: Text-Supported Model (World/SAM) ---
                 endpoint = '/segment-by-text';
                 formData.append('text_prompt', promptText);
-                formData.append('sam_model_name', isSamModel ? selectedModel : 'sam2.1_l.pt'); // If it's World, use SAM as a helper
-                // Use frontend state values if available, otherwise defaults
-                formData.append('box_confidence', '0.25');
-                formData.append('iou_threshold', '0.45');
+                formData.append('sam_model_name', isSamModel ? selectedModel : 'sam2.1_l.pt');
+
+                // Dynamic Params
+                formData.append('box_confidence', currentParams?.conf ?? 0.25);
+                formData.append('iou_threshold', currentParams?.iou ?? 0.45);
             } else {
                 // --- SCENARIO B: Standard Model (YOLOv8-seg, etc.) ---
-                // Even if the user entered text, it falls back here because the model does not support it (if they confirmed)
                 endpoint = '/detect-all';
                 formData.append('model_name', selectedModel);
-                formData.append('confidence', (confidenceThreshold / 100).toFixed(2));
+                // Dynamic Params
+                formData.append('confidence', currentParams?.conf ?? 0.25);
+                formData.append('iou', currentParams?.iou ?? 0.45);
+
+                if (currentParams?.retina_masks) {
+                    formData.append('retina_masks', true);
+                }
             }
 
             console.log(`Sending request to ${endpoint} with model ${selectedModel}`);
@@ -587,7 +610,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
         } finally {
             setIsProcessing(false);
         }
-    }, [imageFile, confidenceThreshold, textPrompt, annotations, addToHistory, setAnnotations]);
+    }, [imageFile, textPrompt, annotations, addToHistory, setAnnotations, selectedModel, currentParams]);
 
 
     return {
@@ -595,7 +618,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
         tool,
         color,
         eraserSize,
-        confidenceThreshold,
+
         filterText,
 
         // Drawing State
@@ -613,7 +636,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
         setTool: changeTool,
         setColor,
         setEraserSize,
-        setConfidenceThreshold,
+
         setFilterText,
         setCurrentPolyPoints,
         setCurrentPenPoints,

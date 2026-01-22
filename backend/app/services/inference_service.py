@@ -50,7 +50,7 @@ class InferenceService:
         """
         img_h, img_w = img.shape[:2]
         slices = get_slices(img_h, img_w, tile_size=tile_size, overlap=tile_overlap)
-        
+        print(confidence)
         all_detections = []
         print(f"Slicing image ({img_w}x{img_h}) into {len(slices)} tiles...")
         

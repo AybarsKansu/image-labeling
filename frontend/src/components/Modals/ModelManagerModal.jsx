@@ -1,174 +1,194 @@
-import React, { useState, useEffect } from 'react';
-import '../components.css';
-import { API_URL } from '../../constants/config';
+import React from 'react';
 
-export default function ModelManagerModal({ isOpen, onClose, activeModel, onSelectModel }) {
-    const [activeTab, setActiveTab] = useState('all'); // 'all' or 'downloaded'
-    const [models, setModels] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [statusMsg, setStatusMsg] = useState('');
-
-    useEffect(() => {
-        if (isOpen) fetchModels();
-    }, [isOpen]);
-
-    const fetchModels = async () => {
-        try {
-            const res = await fetch(`${API_URL}/models`);
-            const data = await res.json();
-            // Backend returns { models: [ModelInfo, ...] }
-            setModels(data.models || []);
-        } catch (e) {
-            console.error("Failed to fetch models", e);
-            setStatusMsg("Failed to fetch model list.");
-        }
-    };
-
-    const handleDownload = async (modelId) => {
-        setLoading(true);
-        setStatusMsg(`Downloading ${modelId}...`);
-        try {
-            const formData = new FormData();
-            formData.append('model_id', modelId); // Backend expects model_id now
-            const res = await fetch(`${API_URL}/download-model`, {
-                method: 'POST',
-                body: JSON.stringify({ model_id: modelId }), // Using JSON body as per Pydantic schema
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-            const data = await res.json();
-
-            if (res.ok && data.success) {
-                setStatusMsg(`Successfully loaded ${modelId}`);
-                fetchModels();
-            } else {
-                setStatusMsg(`Error: ${data.detail || data.error || 'Download failed'}`);
-            }
-        } catch (e) {
-            setStatusMsg(`Error: ${e.message}`);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleDelete = async (modelId) => {
-        if (!confirm(`Delete ${modelId}?`)) return;
-        try {
-            const res = await fetch(`${API_URL}/delete-model?model_id=${modelId}`, {
-                method: 'DELETE'
-            });
-            if (res.ok) fetchModels();
-        } catch (e) {
-            console.error(e);
-        }
-    };
-
-    // Filter models based on tab
-    const displayedModels = activeTab === 'downloaded'
-        ? models.filter(m => m.is_downloaded)
-        : models;
-
+const ModelManagerModal = ({
+    isOpen,
+    onClose,
+    models,
+    loadingModelIds = [],
+    downloadModel,
+    deleteModel
+}) => {
     if (!isOpen) return null;
 
+    // Helper to check if a specific model is loading (downloading/deleting)
+    const isModelLoading = (id) => loadingModelIds.includes(id);
+
     return (
-        <div className="modal-overlay">
-            <div className="modal-container">
+        <div className="modal-overlay" style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 1000
+        }}>
+            <div className="modal-content" style={{
+                backgroundColor: '#1f2937',
+                borderRadius: '8px',
+                width: '800px',
+                maxWidth: '95vw',
+                maxHeight: '85vh',
+                display: 'flex',
+                flexDirection: 'column',
+                color: 'white',
+                border: '1px solid #374151',
+                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)'
+            }}>
                 {/* Header */}
-                <div className="modal-header">
-
-                    <button onClick={onClose} className="close-btn">✖</button>
+                <div style={{
+                    padding: '16px 24px',
+                    borderBottom: '1px solid #374151',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                }}>
+                    <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', margin: 0 }}>
+                        🤖 Model Manager
+                    </h2>
+                    <button
+                        onClick={onClose}
+                        style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#9ca3af',
+                            cursor: 'pointer',
+                            fontSize: '1.5rem'
+                        }}
+                    >
+                        &times;
+                    </button>
                 </div>
 
-                {/* Tabs */}
-                <div className="modal-tabs">
-                    <button
-                        onClick={() => setActiveTab('all')}
-                        className={`tab-btn ${activeTab === 'all' ? 'active sota' : ''}`}
-                    >
-                        All Models
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('downloaded')}
-                        className={`tab-btn ${activeTab === 'downloaded' ? 'active local' : ''}`}
-                    >
-                        Installed ({models.filter(m => m.is_downloaded).length})
-                    </button>
-                </div>
+                {/* Content - Scrollable Table */}
+                <div style={{ padding: '24px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                        <thead>
+                            <tr style={{ borderBottom: '2px solid #374151', color: '#9ca3af', textAlign: 'left' }}>
+                                <th style={{ padding: '12px' }}>Name / ID</th>
+                                <th style={{ padding: '12px' }}>Type</th>
+                                <th style={{ padding: '12px' }}>Description</th>
+                                <th style={{ padding: '12px', textAlign: 'right' }}>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {models.map(model => (
+                                <tr key={model.id} style={{ borderBottom: '1px solid #374151' }}>
 
-                {/* Content */}
-                <div className="modal-content">
-                    {loading && (
-                        <div className="status-msg">
-                            <div className="spinner"></div>
-                            {statusMsg}
-                        </div>
-                    )}
+                                    {/* Name Column */}
+                                    <td style={{ padding: '12px', verticalAlign: 'middle' }}>
+                                        <div style={{ fontWeight: 'bold' }}>{model.name}</div>
+                                        <div style={{ fontSize: '0.8em', color: '#6b7280' }}>{model.id}</div>
+                                    </td>
 
-                    <div className="model-list">
-                        {displayedModels.length === 0 && (
-                            <p style={{ color: '#888', textAlign: 'center', padding: '20px' }}>
-                                No models found.
-                            </p>
-                        )}
+                                    {/* Type Badge */}
+                                    <td style={{ padding: '12px', verticalAlign: 'middle' }}>
+                                        <span style={{
+                                            padding: '2px 8px',
+                                            borderRadius: '9999px',
+                                            fontSize: '0.75rem',
+                                            fontWeight: '500',
+                                            backgroundColor: model.type === 'detection' ? 'rgba(16, 185, 129, 0.2)' : model.type === 'segmentation' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(107, 114, 128, 0.2)',
+                                            color: model.type === 'detection' ? '#34d399' : model.type === 'segmentation' ? '#60a5fa' : '#d1d5db'
+                                        }}>
+                                            {model.type}
+                                        </span>
+                                    </td>
 
-                        {displayedModels.map((m) => {
-                            const isActive = activeModel === m.id;
+                                    {/* Description */}
+                                    <td style={{ padding: '12px', color: '#d1d5db', verticalAlign: 'middle' }}>
+                                        {model.description}
+                                    </td>
 
-                            return (
-                                <div key={m.id} className={`model-item ${m.is_downloaded ? 'downloaded' : ''}`}>
-                                    <div className="model-info">
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                            <h3>{m.name}</h3>
-                                            {m.family === 'SAM' && <span className="badge-rec">SAM</span>}
-                                            {m.type === 'segmentation' && <span className="badge-seg">SEG</span>}
-                                        </div>
-                                        <p>{m.description}</p>
-                                        <code style={{ fontSize: '0.75rem', color: '#666' }}>{m.id}</code>
-                                    </div>
-
-                                    <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                                        {m.is_downloaded ? (
-                                            <>
-                                                <button
-                                                    onClick={() => onSelectModel(m.id)}
-                                                    className="btn-select"
-                                                    style={{
-                                                        background: isActive ? '#10b981' : '#4b5563',
-                                                        cursor: isActive ? 'default' : 'pointer',
-                                                        fontWeight: 'bold',
-                                                        opacity: isActive ? 1 : 0.9
-                                                    }}
-                                                >
-                                                    {isActive ? 'ACTIVE' : 'Select'}
-                                                </button>
-                                                {!isActive && (
-                                                    <button
-                                                        onClick={() => handleDelete(m.id)}
-                                                        className="btn-delete"
-                                                        title="Delete local file"
-                                                    >
-                                                        🗑️
-                                                    </button>
-                                                )}
-                                            </>
+                                    {/* Actions */}
+                                    <td style={{ padding: '12px', textAlign: 'right', verticalAlign: 'middle' }}>
+                                        {model.is_downloaded ? (
+                                            <button
+                                                onClick={() => deleteModel(model.id)}
+                                                disabled={isModelLoading(model.id)}
+                                                style={{
+                                                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                                    color: isModelLoading(model.id) ? '#6b7280' : '#ef4444',
+                                                    border: '1px solid rgba(239, 68, 68, 0.2)',
+                                                    padding: '6px 12px',
+                                                    borderRadius: '6px',
+                                                    cursor: isModelLoading(model.id) ? 'not-allowed' : 'pointer',
+                                                    transition: 'all 0.2s',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px',
+                                                    fontSize: '0.85rem'
+                                                }}
+                                            >
+                                                {isModelLoading(model.id) ? (
+                                                    <span className="spinner-small" />
+                                                ) : '🗑️'}
+                                                {isModelLoading(model.id) ? 'Deleting...' : 'Delete'}
+                                            </button>
                                         ) : (
                                             <button
-                                                onClick={() => handleDownload(m.id)}
-                                                disabled={loading}
-                                                className="btn-primary"
+                                                onClick={() => downloadModel(model.id)}
+                                                disabled={isModelLoading(model.id)}
+                                                style={{
+                                                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                                                    color: isModelLoading(model.id) ? '#6b7280' : '#3b82f6',
+                                                    border: '1px solid rgba(59, 130, 246, 0.2)',
+                                                    padding: '6px 12px',
+                                                    borderRadius: '6px',
+                                                    cursor: isModelLoading(model.id) ? 'not-allowed' : 'pointer',
+                                                    transition: 'all 0.2s',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '6px',
+                                                    fontSize: '0.85rem'
+                                                }}
                                             >
-                                                Download
+                                                {isModelLoading(model.id) ? (
+                                                    <span className="spinner-small" />
+                                                ) : '⬇️'}
+                                                {isModelLoading(model.id) ? 'Downloading...' : 'Download'}
                                             </button>
                                         )}
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
 
+                {/* Footer */}
+                <div style={{
+                    padding: '16px 24px',
+                    borderTop: '1px solid #374151',
+                    textAlign: 'right',
+                    color: '#6b7280',
+                    fontSize: '0.85rem'
+                }}>
+                    Models are downloaded from official repositories. Large models may take time to download.
                 </div>
             </div>
+
+            {/* Simple Spinner Style for this component */}
+            <style jsx>{`
+                .spinner-small {
+                    width: 12px;
+                    height: 12px;
+                    border: 2px solid currentColor;
+                    border-bottom-color: transparent;
+                    border-radius: 50%;
+                    display: inline-block;
+                    animation: rotation 1s linear infinite;
+                }
+                @keyframes rotation {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+            `}</style>
         </div>
     );
-}
+};
+
+export default ModelManagerModal;

@@ -13,8 +13,9 @@ import { usePolygonModifiers } from './hooks/usePolygonModifiers';
 // Components
 import { CanvasStage } from './components/Canvas';
 import { MainToolbar } from './components/Toolbar';
-import { FloatingPanel, PropertiesPanel, FloatingSelectionMenu } from './components/Panels';
-import { SettingsModal, ModelManagerModal, PreprocessingModal, TrainPanel } from './components/Modals';
+import { FloatingPanel, PropertiesPanel, FloatingSelectionMenu, ModelParametersPanel } from './components/Panels';
+import DragDropZone from './components/Common/DragDropZone';
+import { ModelManagerModal, PreprocessingModal, TrainPanel } from './components/Modals';
 
 // Config
 import { API_URL } from './constants/config';
@@ -38,7 +39,7 @@ function App() {
   const aiModels = useAIModels('yolov11x-seg.pt', textPrompt);
 
   // Draw tools (pen, box, knife, eraser, etc.)
-  const drawTools = useDrawTools(stage, annotationsHook, textPrompt);
+  const drawTools = useDrawTools(stage, annotationsHook, textPrompt, aiModels.selectedModel, aiModels.currentParams);
 
   // Polygon modifiers (simplify, densify, beautify)
   const polygonMods = usePolygonModifiers(annotationsHook, stage);
@@ -124,11 +125,8 @@ function App() {
           return turf.polygon([coords]);
         });
 
-        // Merge iteratively
-        let merged = polygons[0];
-        for (let i = 1; i < polygons.length; i++) {
-          merged = turf.union(merged, polygons[i]);
-        }
+        // Merge all at once (Turf 7.x style)
+        const merged = turf.union(turf.featureCollection(polygons));
 
         if (merged) {
           const newAnns = [];
@@ -260,17 +258,17 @@ function App() {
 
   // Handle detect all
   const handleDetectAll = useCallback(() => {
-    drawTools.handleDetectAll(aiModels.selectedModel);
-  }, [drawTools, aiModels.selectedModel]);
+    drawTools.handleDetectAll();
+  }, [drawTools]);
 
   // Handle mouse events (pass selected model)
   const handleMouseDown = useCallback((e) => {
-    drawTools.handleMouseDown(e, aiModels.selectedModel);
-  }, [drawTools, aiModels.selectedModel]);
+    drawTools.handleMouseDown(e);
+  }, [drawTools]);
 
   const handleMouseUp = useCallback(async () => {
-    await drawTools.handleMouseUp(aiModels.selectedModel);
-  }, [drawTools, aiModels.selectedModel]);
+    await drawTools.handleMouseUp();
+  }, [drawTools]);
 
   // Handle double-click (close polygon - CVAT-style)
   // Disabled auto-close on double click to prevent accidental closing when clicking fast
@@ -444,10 +442,16 @@ function App() {
 
         textPrompt={textPrompt}
         setTextPrompt={setTextPrompt}
+
+        models={aiModels.downloadedModels}
         selectedModel={aiModels.selectedModel}
+        onSelectModel={aiModels.setSelectedModel}
         onOpenModelManager={aiModels.actions.openModelManager}
-        onOpenSettings={aiModels.actions.openSettings}
         onOpenTrainModal={aiModels.actions.openTrainModal}
+
+        enableAugmentation={enableAugmentation}
+        setEnableAugmentation={setEnableAugmentation}
+
         onDetectAll={handleDetectAll}
         onSave={handleSave}
         onUndo={annotationsHook.handleUndo}
@@ -481,30 +485,34 @@ function App() {
 
         {/* Center: Canvas Area */}
         <div className="canvas-area" ref={canvasContainerRef}>
-          <CanvasStage
-            stageRef={stage.stageRef}
-            groupRef={stage.groupRef}
-            stageSize={stage.stageSize}
-            imageObj={stage.imageObj}
-            imageLayout={stage.imageLayout}
-            annotations={annotationsHook.annotations}
-            selectedIds={annotationsHook.selectedIds}
-            filterText={drawTools.filterText}
-            tool={drawTools.tool}
-            tempAnnotation={drawTools.tempAnnotation}
-            currentPolyPoints={drawTools.currentPolyPoints}
-            currentPenPoints={drawTools.currentPenPoints}
-            mousePos={drawTools.mousePos}
-            eraserSize={drawTools.eraserSize}
-            color={drawTools.color}
-            onWheel={stage.handleWheel}
-            onClick={drawTools.handleStageClick}
-            onMouseDown={handleMouseDown}
-            onMouseMove={drawTools.handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onDblClick={handleDoubleClick}
-            onVertexDrag={drawTools.handleVertexDrag}
-          />
+          {!stage.imageObj ? (
+            <DragDropZone onImageUpload={handleImageUpload} />
+          ) : (
+            <CanvasStage
+              stageRef={stage.stageRef}
+              groupRef={stage.groupRef}
+              stageSize={stage.stageSize}
+              imageObj={stage.imageObj}
+              imageLayout={stage.imageLayout}
+              annotations={annotationsHook.annotations}
+              selectedIds={annotationsHook.selectedIds}
+              filterText={drawTools.filterText}
+              tool={drawTools.tool}
+              tempAnnotation={drawTools.tempAnnotation}
+              currentPolyPoints={drawTools.currentPolyPoints}
+              currentPenPoints={drawTools.currentPenPoints}
+              mousePos={drawTools.mousePos}
+              eraserSize={drawTools.eraserSize}
+              color={drawTools.color}
+              onWheel={stage.handleWheel}
+              onClick={drawTools.handleStageClick}
+              onMouseDown={handleMouseDown}
+              onMouseMove={drawTools.handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onDblClick={handleDoubleClick}
+              onVertexDrag={drawTools.handleVertexDrag}
+            />
+          )}
 
           {/* Floating Selection Menu (positioned absolutely within canvas area) */}
           {menuPosition && (
@@ -524,44 +532,47 @@ function App() {
 
         {/* Right Panel: Properties */}
         <div className="right-panel-container" style={{ width: rightPanelWidth }}>
-          <PropertiesPanel
-            docked={true}
-            selectedAnn={annotationsHook.selectedAnn}
-            selectedLabel={annotationsHook.selectedLabel}
-            onLabelChange={handleLabelChange}
-            onDelete={annotationsHook.deleteSelected}
-            onSimplify={polygonMods.handleSimplify}
-            onDensify={polygonMods.handleDensify}
-            onReset={polygonMods.handleReset}
-            onBeautify={handleBeautify}
-            canModify={polygonMods.canModify}
-            canReset={polygonMods.canReset}
-            isProcessing={drawTools.isProcessing}
-            suggestions={annotationsHook.selectedAnn?.suggestions}
-          />
+          {annotationsHook.selectedAnn ? (
+            <PropertiesPanel
+              docked={true}
+              selectedAnn={annotationsHook.selectedAnn}
+              selectedLabel={annotationsHook.selectedLabel}
+              onLabelChange={handleLabelChange}
+              onDelete={annotationsHook.deleteSelected}
+              onSimplify={polygonMods.handleSimplify}
+              onDensify={polygonMods.handleDensify}
+              onReset={polygonMods.handleReset}
+              onBeautify={handleBeautify}
+              canModify={polygonMods.canModify}
+              canReset={polygonMods.canReset}
+              isProcessing={drawTools.isProcessing}
+              suggestions={annotationsHook.selectedAnn?.suggestions}
+            />
+          ) : aiModels.selectedModel ? (
+            <ModelParametersPanel
+              selectedModel={aiModels.selectedModel}
+              currentParams={aiModels.currentParams}
+              updateParam={aiModels.updateParam}
+            />
+          ) : (
+            <div style={{ padding: '20px', color: '#666', fontSize: '13px', fontStyle: 'italic', textAlign: 'center', marginTop: '50px' }}>
+              <p>Select a polygon to edit properties</p>
+              <p>or</p>
+              <p>Select a model to configure parameters</p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Modals */}
-      <SettingsModal
-        isOpen={aiModels.modals.showSettings}
-        onClose={aiModels.actions.closeSettings}
-        availableModels={aiModels.models}
-        selectedModel={aiModels.selectedModel}
-        setSelectedModel={aiModels.setSelectedModel}
-        enableAugmentation={enableAugmentation}
-        setEnableAugmentation={setEnableAugmentation}
-        textBoxConf={textBoxConf}
-        setTextBoxConf={setTextBoxConf}
-        textIou={textIou}
-        setTextIou={setTextIou}
-      />
+
 
       <ModelManagerModal
         isOpen={aiModels.modals.showModelManager}
         onClose={aiModels.actions.closeModelManager}
-        activeModel={aiModels.selectedModel}
-        onSelectModel={aiModels.setSelectedModel}
+        models={aiModels.models}
+        loadingModelIds={aiModels.loadingModelIds}
+        downloadModel={aiModels.actions.downloadModel}
+        deleteModel={aiModels.actions.deleteModel}
       />
 
       <PreprocessingModal

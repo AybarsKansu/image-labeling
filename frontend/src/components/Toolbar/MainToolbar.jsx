@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { MODEL_CONFIG } from '../../constants/modelConfig';
 import './MainToolbar.css';
 
 /**
@@ -16,16 +17,22 @@ const MainToolbar = ({
     setTool,
     eraserSize,
     setEraserSize,
-    confidenceThreshold,
-    setConfidenceThreshold,
+
     textPrompt,
     setTextPrompt,
 
     // AI Models
+    models, // List of downloaded model objects
     selectedModel,
-    onOpenModelManager,
-    onOpenSettings,
+    onSelectModel,
+    onOpenModelManager, // Action to open modal
     onOpenTrainModal,
+
+    // ... (rest of props)
+
+    // Augmentation
+    enableAugmentation,
+    setEnableAugmentation,
 
     // Actions
     onDetectAll,
@@ -181,48 +188,57 @@ const MainToolbar = ({
 
                 </button>
 
-                <div className="tooltip-container">
-                    <button
-                        className="toolbar-btn"
-                        onClick={onOpenModelManager}
+                <div className="tooltip-container" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    {/* Model Dropdown */}
+                    <select
+                        className="model-select-dropdown"
+                        value={selectedModel || ''}
+                        onChange={(e) => {
+                            if (onSelectModel) onSelectModel(e.target.value);
+                        }}
+                        style={{
+                            background: '#374151',
+                            color: 'white',
+                            border: '1px solid #4b5563',
+                            borderRadius: '4px',
+                            padding: '4px 8px',
+                            fontSize: '12px',
+                            height: '30px',
+                            outline: 'none',
+                            cursor: 'pointer',
+                            maxWidth: '160px'
+                        }}
                     >
-                        ⚡ {selectedModel?.split('.')[0] || 'Models'}
+                        <option value="" disabled>✨ Select AI Model...</option>
+                        {/* Models are now objects { id, name, ... } */}
+                        {models && models.map(model => (
+                            <option key={model.id} value={model.id}>
+                                {model.name}
+                            </option>
+                        ))}
+                    </select>
+
+                    {/* Manage Models Button */}
+                    <button
+                        onClick={onOpenModelManager}
+                        title="Manage Models"
+                        style={{
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontSize: '16px',
+                            padding: '0 4px',
+                            opacity: 0.7
+                        }}
+                        onMouseOver={(e) => e.target.style.opacity = 1}
+                        onMouseOut={(e) => e.target.style.opacity = 0.7}
+                    >
+                        ⚙️
                     </button>
-
                 </div>
             </div>
 
-            {/* Confidence Slider */}
-            <div className="toolbar-section">
-                <div className="confidence-header">
-                    <span className="section-label">Confidence</span>
-                    <div className="value-badge">
-                        <input
-                            type="number"
-                            min="1"
-                            max="100"
-                            value={confidenceThreshold}
-                            onChange={(e) => {
-                                let val = parseInt(e.target.value);
-                                if (val > 100) val = 100;
-                                if (val < 1) val = 1;
-                                setConfidenceThreshold(isNaN(val) ? '' : val);
-                            }}
-                            className="minimal-input"
-                        />
-                        <span className="unit">%</span>
-                    </div>
-                </div>
 
-                <input
-                    type="range"
-                    min="1"
-                    max="100"
-                    value={confidenceThreshold}
-                    onChange={(e) => setConfidenceThreshold(parseInt(e.target.value))}
-                    className="minimal-slider"
-                />
-            </div>
 
             <div className="toolbar-divider" />
 
@@ -264,13 +280,20 @@ const MainToolbar = ({
                 >
                     💾 Save
                 </button>
+
+                {/* Augmentation Toggle */}
                 <button
-                    className="toolbar-btn"
-                    onClick={onOpenSettings}
-                    title="Settings"
+                    className={`toolbar-btn ${enableAugmentation ? 'active-toggle' : ''}`}
+                    onClick={() => setEnableAugmentation(!enableAugmentation)}
+                    title="Toggle Augmentation"
+                    style={{
+                        opacity: enableAugmentation ? 1 : 0.6,
+                        border: enableAugmentation ? '1px solid #10b981' : '1px solid transparent'
+                    }}
                 >
-                    ⚙️
+                    Data Augmentation
                 </button>
+
                 <button
                     className="toolbar-btn"
                     onClick={onOpenTrainModal}

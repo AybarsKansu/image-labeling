@@ -115,6 +115,7 @@
     "punycode": "^2.3.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
+    "react-dropzone": "^14.3.8",
     "react-konva": "^19.2.1",
     "react-reconciler": "^0.33.0",
     "react-refresh": "^0.18.0",

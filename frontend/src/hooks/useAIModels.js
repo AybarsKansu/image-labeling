@@ -1,199 +1,161 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { API_URL } from '../constants/config';
+import { getModelConfig, MODEL_CONFIG } from '../constants/modelConfig';
 
 /**
  * useAIModels Hook
- * Manages AI models, training status, and modal visibility
+ * Manages AI models, parameters, and selection logic.
  */
-export const useAIModels = (initialModel = 'yolov11x-seg.pt', textPrompt) => {
+export const useAIModels = (initialModel = null, textPrompt) => {
     // --- Model State ---
-    const [availableModels, setAvailableModels] = useState([initialModel]);
-    const [selectedModel, setSelectedModel] = useState(initialModel);
+    const [selectedModel, setSelectedModel] = useState(initialModel || null);
 
-    // --- Training State ---
-    const [trainingStatus, setTrainingStatus] = useState({
-        is_training: false,
-        progress: 0,
-        message: 'Idle'
-    });
+    // --- Dynamic Model Parameters ---
+    const [currentParams, setCurrentParams] = useState({});
+    // --- Model List State ---
+    const [models, setModels] = useState([]);
+    const [loadingModelIds, setLoadingModelIds] = useState([]); // Track multiple concurrent ops
 
-    // --- Modal Visibility ---
-    const [showModelManager, setShowModelManager] = useState(false);
-    const [showTrainModal, setShowTrainModal] = useState(false);
-    const [showPreprocessingModal, setShowPreprocessingModal] = useState(false);
-    const [showSettings, setShowSettings] = useState(false);
+    // Derived state: Only show downloaded models in dropdown
+    const downloadedModels = models.filter(m => m.is_downloaded);
 
-    // --- Processing State ---
-    const [isProcessing, setIsProcessing] = useState(false);
-
-    // --- Fetch Available Models ---
+    // Fetch models from backend
     const fetchModels = useCallback(async () => {
         try {
             const res = await axios.get(`${API_URL}/models`);
-            if (res.data.models) {
-                setAvailableModels(res.data.models);
+            // Expecting { models: [...] } based on schema
+            const data = res.data;
+            if (data.models && Array.isArray(data.models)) {
+                setModels(data.models);
+            } else if (Array.isArray(data)) {
+                setModels(data);
             }
         } catch (err) {
-            console.error('Failed to fetch models', err);
+            console.error("Failed to fetch models:", err);
         }
     }, []);
 
-    // --- Fetch models on mount ---
     useEffect(() => {
         fetchModels();
     }, [fetchModels]);
+    // Training State (preserved from previous logic)
+    const [trainingStatus, setTrainingStatus] = useState({
+        isTraining: false,
+        progress: 0,
+        epoch: 0,
+        totalEpochs: 0,
+        map50: 0,
+        loss: 0
+    });
 
-    // --- Poll Training Status when train modal is open ---
+    // Update params when model changes
     useEffect(() => {
-        let interval;
-        if (showTrainModal || showPreprocessingModal) {
-            const fetchStatus = async () => {
-                try {
-                    const res = await axios.get(`${API_URL}/training-status`);
-                    setTrainingStatus(res.data);
-                } catch (err) {
-                    console.error('Failed to fetch training status', err);
-                }
-            };
-
-            fetchStatus(); // Initial fetch
-            interval = setInterval(fetchStatus, 2000);
+        if (!selectedModel) {
+            setCurrentParams({});
+            return;
         }
-        return () => clearInterval(interval);
-    }, [showTrainModal, showPreprocessingModal]);
 
-    // --- Start Training ---
-    const startTraining = useCallback(async (config) => {
-        try {
-            const formData = new FormData();
-            formData.append('base_model', config.base_model || selectedModel);
-            formData.append('epochs', config.epochs || 100);
-            formData.append('batch_size', config.batch_size || 16);
-
-            // Add preprocessing options if provided
-            if (config.autoOrient !== undefined) {
-                formData.append('auto_orient', String(config.autoOrient));
-            }
-            if (config.resizeMode) {
-                formData.append('resize_mode', config.resizeMode);
-            }
-            if (config.enableTiling !== undefined) {
-                formData.append('enable_tiling', String(config.enableTiling));
-                formData.append('tile_size', config.tileSize || 640);
-                formData.append('tile_overlap', config.tileOverlap || 0.2);
-            }
-
-            const res = await axios.post(`${API_URL}/train-model`, formData);
-
-            if (res.data.error) {
-                return { success: false, error: res.data.error };
-            }
-            return { success: true, data: res.data };
-        } catch (err) {
-            console.error('Training start failed', err);
-            return {
-                success: false,
-                error: err.response?.data?.error || err.message
-            };
+        const config = getModelConfig(selectedModel);
+        if (config && config.parameters) {
+            // Reset to defaults defined in config
+            const defaults = config.parameters.reduce((acc, param) => {
+                acc[param.key] = param.default;
+                return acc;
+            }, {});
+            setCurrentParams(defaults);
+        } else {
+            setCurrentParams({});
         }
     }, [selectedModel]);
 
-    // --- Download Model ---
-    const downloadModel = useCallback(async (modelId) => {
-        try {
-            const res = await axios.post(`${API_URL}/download-model`, {
-                model_id: modelId
-            });
-
-            if (res.data.success) {
-                await fetchModels(); // Refresh model list
-                return { success: true };
-            }
-            return { success: false, error: res.data.error || res.data.message };
-
-        } catch (err) {
-            return { success: false, error: err.message };
-        }
-    }, [fetchModels]);
-
-    // --- Delete Model ---
-    const deleteModel = useCallback(async (modelId) => {
-        try {
-            await axios.delete(`${API_URL}/delete-model`, {
-                params: { model_id: modelId }
-            });
-            await fetchModels(); // Refresh model list
-            return { success: true };
-        } catch (err) {
-            return { success: false, error: err.message };
-        }
-    }, [fetchModels]);
-
-    // --- Select Model ---
-    const selectModel = useCallback((modelName) => {
-        setSelectedModel(modelName);
+    // Helper to update a single param (passed to UI)
+    const updateParam = useCallback((key, value) => {
+        setCurrentParams(prev => ({ ...prev, [key]: value }));
     }, []);
 
-    // --- Modal Actions ---
-    const openModelManager = useCallback(() => setShowModelManager(true), []);
-    const closeModelManager = useCallback(() => setShowModelManager(false), []);
-    const openTrainModal = useCallback(() => setShowTrainModal(true), []);
-    const closeTrainModal = useCallback(() => setShowTrainModal(false), []);
-    const openPreprocessingModal = useCallback(() => setShowPreprocessingModal(true), []);
-    const closePreprocessingModal = useCallback(() => setShowPreprocessingModal(false), []);
-    const openSettings = useCallback(() => setShowSettings(true), []);
-    const closeSettings = useCallback(() => setShowSettings(false), []);
+    // --- Modals State ---
+    const [modals, setModals] = useState({
+        showModelManager: false,
+        showSettings: false,
+        showTrainModal: false,
+        showPreprocessingModal: false
+    });
+    // --- Actions ---
+    const downloadModel = async (modelId) => {
+        if (loadingModelIds.includes(modelId)) return;
+
+        setLoadingModelIds(prev => [...prev, modelId]);
+        try {
+            await axios.post(`${API_URL}/download-model`, { model_id: modelId });
+            // Refresh list to update numbers/status
+            await fetchModels();
+        } catch (err) {
+            console.error(`Failed to download ${modelId}:`, err);
+            alert(`Download failed: ${err.response?.data?.detail || err.message}`);
+        } finally {
+            setLoadingModelIds(prev => prev.filter(id => id !== modelId));
+        }
+    };
+
+    const deleteModel = async (modelId) => {
+        if (loadingModelIds.includes(modelId)) return;
+
+        if (!window.confirm(`Are you sure you want to delete ${modelId}?`)) return;
+
+        setLoadingModelIds(prev => [...prev, modelId]);
+        try {
+            // Check if deleted model is currently selected
+            if (selectedModel === modelId) {
+                setSelectedModel(null);
+            }
+
+            // The delete endpoint expects JSON body with model_id if using DELETE method carefully
+            // But axios.delete needs 'data' key for body
+            await axios.delete(`${API_URL}/delete-model`, {
+                data: { model_id: modelId }
+            });
+            await fetchModels();
+        } catch (err) {
+            console.error(`Failed to delete ${modelId}:`, err);
+            alert(`Delete failed: ${err.response?.data?.detail || err.message}`);
+        } finally {
+            setLoadingModelIds(prev => prev.filter(id => id !== modelId));
+        }
+    };
+
+    const actions = {
+        openModelManager: () => setModals(prev => ({ ...prev, showModelManager: true })),
+        closeModelManager: () => setModals(prev => ({ ...prev, showModelManager: false })),
+
+        openSettings: () => setModals(prev => ({ ...prev, showSettings: true })),
+        closeSettings: () => setModals(prev => ({ ...prev, showSettings: false })),
+
+        openTrainModal: () => setModals(prev => ({ ...prev, showTrainModal: true })),
+        closeTrainModal: () => setModals(prev => ({ ...prev, showTrainModal: false })),
+
+        openPreprocessingModal: () => setModals(prev => ({ ...prev, showPreprocessingModal: true })),
+        closePreprocessingModal: () => setModals(prev => ({ ...prev, showPreprocessingModal: false })),
+
+        setModel: setSelectedModel,
+        downloadModel,
+        deleteModel
+    };
 
     return {
-        // Model State
-        models: availableModels,
         selectedModel,
-        activeModel: selectedModel,
-
-        // Training State
+        setSelectedModel, // Make sure to expose setter
+        currentParams,
+        updateParam,
+        actions,
+        // Helper to check if model logic needs text
+        modelConfig: getModelConfig(selectedModel),
         trainingStatus,
-        isTraining: trainingStatus.is_training,
-        trainingProgress: trainingStatus.progress,
-        trainingMessage: trainingStatus.message,
-
-        // Processing
-        isProcessing,
-        setIsProcessing,
-
-        // Modal Visibility
-        modals: {
-            showModelManager,
-            showTrainModal,
-            showPreprocessingModal,
-            showSettings
-        },
-
-        // Actions
-        actions: {
-            fetchModels,
-            selectModel,
-            startTraining,
-            downloadModel,
-            deleteModel,
-
-            // Modal controls
-            openModelManager,
-            closeModelManager,
-            openTrainModal,
-            closeTrainModal,
-            openPreprocessingModal,
-            closePreprocessingModal,
-            openSettings,
-            closeSettings
-        },
-
-        // Direct setters (for controlled components)
-        setSelectedModel,
-        setShowModelManager,
-        setShowTrainModal,
-        setShowPreprocessingModal,
-        setShowSettings
+        modals, // Expose modals state
+        models, // Full registry list (objects)
+        downloadedModels, // Ready-to-use list
+        loadingModelIds, // Track async ops
+        isTraining: trainingStatus.isTraining
     };
 };
 

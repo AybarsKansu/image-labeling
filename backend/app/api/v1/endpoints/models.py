@@ -47,12 +47,14 @@ async def download_model(
     Only models defined in models.yaml can be downloaded.
     Does NOT use Ultralytics auto-download to avoid rate limits.
     """
+    # The request body is parsed into DownloadModelRequest
     success, message = model_manager.download_model(request.model_id)
     
     if success:
         # Get updated model info
         models = model_manager.get_available_models()
-        model_info = next((m for m in models if m.id == request.model_id), None)
+        # Find the specific model we just downloaded to return its new state (is_downloaded=True)
+        model_info = next((m for m in models if m['id'] == request.model_id), None)
         return DownloadModelResponse(success=True, message=message, model=model_info)
     
     # Determine appropriate status code based on error
