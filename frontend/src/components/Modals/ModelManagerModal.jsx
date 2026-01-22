@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import '../components.css';
-import { API_URL, officialModels } from '../../constants/config';
-
+import { API_URL } from '../../constants/config';
 
 export default function ModelManagerModal({ isOpen, onClose, activeModel, onSelectModel }) {
-    const [activeTab, setActiveTab] = useState('sota');
-    const [localModels, setLocalModels] = useState([]);
+    const [activeTab, setActiveTab] = useState('all'); // 'all' or 'downloaded'
+    const [models, setModels] = useState([]);
     const [loading, setLoading] = useState(false);
     const [statusMsg, setStatusMsg] = useState('');
 
@@ -17,28 +16,34 @@ export default function ModelManagerModal({ isOpen, onClose, activeModel, onSele
         try {
             const res = await fetch(`${API_URL}/models`);
             const data = await res.json();
-            setLocalModels(data.models || []);
+            // Backend returns { models: [ModelInfo, ...] }
+            setModels(data.models || []);
         } catch (e) {
             console.error("Failed to fetch models", e);
+            setStatusMsg("Failed to fetch model list.");
         }
     };
 
-    const handleDownload = async (modelName) => {
+    const handleDownload = async (modelId) => {
         setLoading(true);
-        setStatusMsg(`Downloading ${modelName}...`);
+        setStatusMsg(`Downloading ${modelId}...`);
         try {
             const formData = new FormData();
-            formData.append('model_name', modelName);
+            formData.append('model_id', modelId); // Backend expects model_id now
             const res = await fetch(`${API_URL}/download-model`, {
                 method: 'POST',
-                body: formData
+                body: JSON.stringify({ model_id: modelId }), // Using JSON body as per Pydantic schema
+                headers: {
+                    'Content-Type': 'application/json'
+                }
             });
             const data = await res.json();
-            if (data.success) {
-                setStatusMsg(`Successfully loaded ${modelName}`);
+
+            if (res.ok && data.success) {
+                setStatusMsg(`Successfully loaded ${modelId}`);
                 fetchModels();
             } else {
-                setStatusMsg(`Error: ${data.error}`);
+                setStatusMsg(`Error: ${data.detail || data.error || 'Download failed'}`);
             }
         } catch (e) {
             setStatusMsg(`Error: ${e.message}`);
@@ -47,20 +52,22 @@ export default function ModelManagerModal({ isOpen, onClose, activeModel, onSele
         }
     };
 
-    const handleDelete = async (modelName) => {
-        if (!confirm(`Delete ${modelName}?`)) return;
+    const handleDelete = async (modelId) => {
+        if (!confirm(`Delete ${modelId}?`)) return;
         try {
-            const formData = new FormData();
-            formData.append('model_name', modelName);
-            const res = await fetch(`${API_URL}/delete-model`, {
-                method: 'DELETE',
-                body: formData
+            const res = await fetch(`${API_URL}/delete-model?model_id=${modelId}`, {
+                method: 'DELETE'
             });
             if (res.ok) fetchModels();
         } catch (e) {
             console.error(e);
         }
     };
+
+    // Filter models based on tab
+    const displayedModels = activeTab === 'downloaded'
+        ? models.filter(m => m.is_downloaded)
+        : models;
 
     if (!isOpen) return null;
 
@@ -78,16 +85,16 @@ export default function ModelManagerModal({ isOpen, onClose, activeModel, onSele
                 {/* Tabs */}
                 <div className="modal-tabs">
                     <button
-                        onClick={() => setActiveTab('sota')}
-                        className={`tab-btn ${activeTab === 'sota' ? 'active sota' : ''}`}
+                        onClick={() => setActiveTab('all')}
+                        className={`tab-btn ${activeTab === 'all' ? 'active sota' : ''}`}
                     >
-                        SOTA Models (2026)
+                        All Models
                     </button>
                     <button
-                        onClick={() => setActiveTab('local')}
-                        className={`tab-btn ${activeTab === 'local' ? 'active local' : ''}`}
+                        onClick={() => setActiveTab('downloaded')}
+                        className={`tab-btn ${activeTab === 'downloaded' ? 'active local' : ''}`}
                     >
-                        My Models ({localModels.length})
+                        Installed ({models.filter(m => m.is_downloaded).length})
                     </button>
                 </div>
 
@@ -100,82 +107,67 @@ export default function ModelManagerModal({ isOpen, onClose, activeModel, onSele
                         </div>
                     )}
 
-                    {activeTab === 'sota' ? (
-                        <div className="model-list">
-                            {officialModels.map((m) => {
-                                const isDownloaded = localModels.includes(m.id);
-                                const isActive = activeModel === m.id;
+                    <div className="model-list">
+                        {displayedModels.length === 0 && (
+                            <p style={{ color: '#888', textAlign: 'center', padding: '20px' }}>
+                                No models found.
+                            </p>
+                        )}
 
-                                return (
-                                    <div key={m.id} className={`model-item ${m.desc.includes('Recommended') ? 'recommended' : ''}`}>
-                                        <div className="model-info">
-                                            <div style={{ display: 'flex', alignItems: 'center' }}>
-                                                <h3>{m.name}</h3>
-                                                {m.desc.includes('Recommended') && <span className="badge-rec">RECOMMENDED</span>}
-                                            </div>
-                                            <p>{m.type} • {m.desc}</p>
+                        {displayedModels.map((m) => {
+                            const isActive = activeModel === m.id;
+
+                            return (
+                                <div key={m.id} className={`model-item ${m.is_downloaded ? 'downloaded' : ''}`}>
+                                    <div className="model-info">
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <h3>{m.name}</h3>
+                                            {m.family === 'SAM' && <span className="badge-rec">SAM</span>}
+                                            {m.type === 'segmentation' && <span className="badge-seg">SEG</span>}
                                         </div>
-                                        <div style={{ display: 'flex', gap: '5px' }}>
-                                            {isDownloaded && (
+                                        <p>{m.description}</p>
+                                        <code style={{ fontSize: '0.75rem', color: '#666' }}>{m.id}</code>
+                                    </div>
+
+                                    <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                                        {m.is_downloaded ? (
+                                            <>
                                                 <button
                                                     onClick={() => onSelectModel(m.id)}
                                                     className="btn-select"
                                                     style={{
                                                         background: isActive ? '#10b981' : '#4b5563',
                                                         cursor: isActive ? 'default' : 'pointer',
-                                                        fontWeight: 'bold'
+                                                        fontWeight: 'bold',
+                                                        opacity: isActive ? 1 : 0.9
                                                     }}
                                                 >
                                                     {isActive ? 'ACTIVE' : 'Select'}
                                                 </button>
-                                            )}
-
-                                            {isDownloaded ? (
-                                                <button disabled className="btn-primary" style={{ background: '#374151', cursor: 'default', opacity: 0.5 }}>Installed</button>
-                                            ) : (
-                                                <button
-                                                    onClick={() => handleDownload(m.id)}
-                                                    disabled={loading}
-                                                    className="btn-primary"
-                                                >
-                                                    Download
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                )
-                            })}
-                        </div>
-                    ) : (
-                        <div className="model-list">
-                            {localModels.length === 0 && <p style={{ color: '#888', textAlign: 'center' }}>No models found.</p>}
-                            {localModels.map((m) => {
-                                const isActive = activeModel === m;
-                                return (
-                                    <div key={m} className="model-item">
-                                        <span style={{ color: '#ccc', fontFamily: 'monospace' }}>{m}</span>
-                                        <div style={{ display: 'flex', gap: '5px' }}>
+                                                {!isActive && (
+                                                    <button
+                                                        onClick={() => handleDelete(m.id)}
+                                                        className="btn-delete"
+                                                        title="Delete local file"
+                                                    >
+                                                        🗑️
+                                                    </button>
+                                                )}
+                                            </>
+                                        ) : (
                                             <button
-                                                onClick={() => onSelectModel(m)}
-                                                className="btn-select"
-                                                style={{
-                                                    background: isActive ? '#10b981' : '#4b5563',
-                                                    cursor: isActive ? 'default' : 'pointer',
-                                                    padding: '5px 10px',
-                                                    borderRadius: '4px',
-                                                    border: 'none',
-                                                    color: 'white'
-                                                }}
+                                                onClick={() => handleDownload(m.id)}
+                                                disabled={loading}
+                                                className="btn-primary"
                                             >
-                                                {isActive ? 'ACTIVE' : 'Select'}
+                                                Download
                                             </button>
-                                            <button onClick={() => handleDelete(m)} className="btn-delete">Delete</button>
-                                        </div>
+                                        )}
                                     </div>
-                                )
-                            })}
-                        </div>
-                    )}
+                                </div>
+                            );
+                        })}
+                    </div>
 
                 </div>
             </div>

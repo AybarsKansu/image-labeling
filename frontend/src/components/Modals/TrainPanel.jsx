@@ -74,8 +74,12 @@ export default function TrainPanel({
                             disabled={isTraining}
                             className="form-select"
                         >
-                            {models.filter(m => !m.toLowerCase().includes('sam')).map(m => (
-                                <option key={m} value={m}>{m}</option>
+                            {models.filter(m => {
+                                const isSam = m.family === 'SAM' || (m.id && m.id.toLowerCase().includes('sam'));
+                                const isMsg = m.id === 'yolo26n.pt'; // Fun easter egg check
+                                return !isSam && !isMsg;
+                            }).map(m => (
+                                <option key={m.id} value={m.id}>{m.name || m.id}</option>
                             ))}
                         </select>
                     </div>

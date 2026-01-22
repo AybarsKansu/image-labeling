@@ -1,16 +1,21 @@
 """
 Model Manager Service.
 Singleton class for managing ML model lifecycle (YOLO/SAM).
-Handles loading, caching, lazy initialization, and cleanup.
+Handles loading, caching, lazy initialization, downloads, and cleanup.
+Uses models.yaml as the source of truth for available models.
 """
 
 import os
 import glob
+import yaml
+import httpx
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from functools import lru_cache
 
 from ultralytics import YOLO
+
+from app.schemas.models import ModelInfo, ModelType, ModelFamily
 
 # Conditional SAM import
 try:
@@ -25,18 +30,22 @@ except ImportError:
 class ModelManager:
     """
     Singleton manager for ML models.
-    Handles lazy loading, caching, and GPU memory management.
+    Handles lazy loading, caching, registry-based downloads, and GPU memory management.
     """
     
     _instance: Optional["ModelManager"] = None
     _models: Dict[str, Any] = {}
+    _registry: Dict[str, dict] = {}  # Model registry from YAML
     _device: str = "cuda"
+    _models_dir: Path = None
     
     def __new__(cls, device: str = "cuda") -> "ModelManager":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._models = {}
+            cls._instance._registry = {}
             cls._instance._device = device
+            cls._instance._load_registry()
         return cls._instance
     
     def __init__(self, device: str = "cuda"):
@@ -45,6 +54,38 @@ class ModelManager:
             self._device = device
             self._initialized = True
     
+    def _load_registry(self) -> None:
+        """Load model registry from models.yaml."""
+        # Determine paths
+        core_dir = Path(__file__).resolve().parent.parent / "core"
+        registry_path = core_dir / "models.yaml"
+        
+        # Set models directory to 'backend/models'
+        self._models_dir = Path(__file__).resolve().parent.parent.parent / "models"
+        self._models_dir.mkdir(exist_ok=True)
+        
+        if not registry_path.exists():
+            print(f"Warning: Model registry not found at {registry_path}")
+            return
+        
+        try:
+            with open(registry_path, 'r') as f:
+                data = yaml.safe_load(f)
+            
+            # Flatten registry: family -> list of models becomes id -> model_data
+            for family, models in data.items():
+                for model in models:
+                    model_id = model['id']
+                    self._registry[model_id] = {
+                        **model,
+                        'family': family
+                    }
+            
+            print(f"Loaded {len(self._registry)} models from registry.")
+            
+        except Exception as e:
+            print(f"Error loading model registry: {e}")
+    
     @property
     def device(self) -> str:
         return self._device
@@ -52,6 +93,38 @@ class ModelManager:
     @property
     def models(self) -> Dict[str, Any]:
         return self._models
+    
+    @property
+    def models_dir(self) -> Path:
+        return self._models_dir
+    
+    def get_available_models(self) -> List[ModelInfo]:
+        """
+        Returns list of all models from registry with download status.
+        Merges YAML config with local file status.
+        
+        Returns:
+            List of ModelInfo objects with is_downloaded status
+        """
+        result = []
+        
+        for model_id, data in self._registry.items():
+            # Check if model file exists locally
+            model_path = self._models_dir / model_id
+            is_downloaded = model_path.exists()
+            
+            model_info = ModelInfo(
+                id=model_id,
+                name=data['name'],
+                type=ModelType(data['type']),
+                family=ModelFamily(data['family']),
+                url=data['url'],
+                description=data['description'],
+                is_downloaded=is_downloaded
+            )
+            result.append(model_info)
+        
+        return result
     
     def scan_models(self, search_paths: list[str] = None) -> list[str]:
         """
@@ -66,15 +139,7 @@ class ModelManager:
         print("Scanning for models...")
         
         if search_paths is None:
-            search_paths = ["*.pt", "**/*.pt"]
-        
-        # Standard models to look for
-        standard_models = [
-            "yolov8m-seg.pt", "yolov8x-seg.pt", 
-            "sam3_b.pt", "sam3_l.pt", "yolov8l-world.pt",
-            "yolo11x-seg.pt", "yolo11l-seg.pt", "yolo11m-seg.pt",
-            "sam2.1_l.pt", "sam2.1_b.pt", "sam2.1_t.pt"
-        ]
+            search_paths = [str(self._models_dir / "*.pt")]
         
         # Discover local files
         local_files = set()
@@ -87,12 +152,8 @@ class ModelManager:
         
         # Load discovered files
         for fp in local_files:
-            self._load_and_register(fp, fp)
-        
-        # Load standard models if they exist locally
-        for m in standard_models:
-            if os.path.exists(m) and m not in self._models:
-                self._load_and_register(m, m)
+            name = os.path.basename(fp)
+            self._load_and_register(name, fp)
         
         return list(self._models.keys())
     
@@ -150,31 +211,14 @@ class ModelManager:
         if model_name in self._models:
             return self._models[model_name]
         
-        # 2. Try lazy load from disk
-        possible_paths = [model_name]
-        if not os.path.exists(model_name):
-            basename = os.path.basename(model_name)
-            if os.path.exists(basename):
-                possible_paths.append(basename)
+        # 2. Try lazy load from disk (check models_dir)
+        model_path = self._models_dir / model_name
+        if model_path.exists():
+            print(f"Lazy loading {model_name}...")
+            if self._load_and_register(model_name, str(model_path)):
+                return self._models.get(model_name)
         
-        for path in possible_paths:
-            if os.path.exists(path):
-                print(f"Lazy loading {path}...")
-                if self._load_and_register(model_name, path):
-                    return self._models.get(model_name)
-        
-        # 3. Try auto-download for known YOLO models
-        if "yolo" in model_name.lower() and "sam" not in model_name.lower():
-            try:
-                print(f"Attempting auto-download for {model_name}...")
-                model = YOLO(model_name)
-                model.to(self._device)
-                self._models[model_name] = model
-                return model
-            except Exception as e:
-                print(f"Auto-download failed for {model_name}: {e}")
-        
-        # 4. Fallback to any available YOLO model
+        # 3. Fallback to any available YOLO model
         if self._models:
             for k, v in self._models.items():
                 if "yolo" in k.lower():
@@ -187,38 +231,86 @@ class ModelManager:
         
         return None
     
-    def download_model(self, model_name: str) -> tuple[bool, str]:
+    def download_model(self, model_id: str) -> tuple[bool, str]:
         """
-        Downloads a model from Ultralytics hub.
+        Downloads a model from the registry URL.
+        
+        IMPORTANT: Does NOT use Ultralytics auto-download.
+        Only downloads models defined in models.yaml.
         
         Args:
-            model_name: Model name to download
+            model_id: Model ID from registry (e.g., 'yolov8n.pt')
             
         Returns:
             Tuple of (success, message)
         """
-        # Validate model name
-        valid_prefixes = ["yolo", "sam"]
-        if not any(model_name.lower().startswith(p) for p in valid_prefixes):
-            return False, "Invalid model name. Must start with 'yolo' or 'sam'."
+        # Validate model exists in registry
+        if model_id not in self._registry:
+            available = list(self._registry.keys())
+            return False, f"Model '{model_id}' not found in registry. Available: {available}"
         
-        print(f"Attempting to download/load: {model_name}")
+        model_data = self._registry[model_id]
+        url = model_data['url']
+        dest_path = self._models_dir / model_id
+        
+        # Check if already downloaded
+        if dest_path.exists():
+            # Load it if not already loaded
+            if model_id not in self._models:
+                self._load_and_register(model_id, str(dest_path))
+            return True, f"Model '{model_id}' already exists."
+        
+        print(f"Downloading {model_id} from {url}...")
         
         try:
-            if self._is_sam_model(model_name):
-                if not SAM_AVAILABLE:
-                    return False, "SAM support not available (ultralytics.SAM missing)"
-                model = SAM(model_name)
+            success = self._download_file(url, dest_path)
+            if success:
+                # Load the newly downloaded model
+                self._load_and_register(model_id, str(dest_path))
+                return True, f"Successfully downloaded {model_id}"
             else:
-                model = YOLO(model_name)
-            
-            model.to(self._device)
-            self._models[model_name] = model
-            return True, f"Successfully loaded {model_name}"
-            
+                return False, f"Failed to download {model_id}"
+                
         except Exception as e:
             print(f"Download failed: {e}")
-            return False, f"Failed to download/load model: {str(e)}"
+            return False, f"Failed to download model: {str(e)}"
+    
+    def _download_file(self, url: str, dest: Path) -> bool:
+        """
+        Download a file from URL to destination path.
+        
+        Args:
+            url: Source URL
+            dest: Destination file path
+            
+        Returns:
+            True if successful
+        """
+        try:
+            with httpx.stream("GET", url, follow_redirects=True, timeout=300) as response:
+                response.raise_for_status()
+                
+                total = int(response.headers.get("content-length", 0))
+                downloaded = 0
+                
+                with open(dest, "wb") as f:
+                    for chunk in response.iter_bytes(chunk_size=8192):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        if total > 0:
+                            pct = (downloaded / total) * 100
+                            print(f"\rDownloading: {pct:.1f}%", end="", flush=True)
+                
+                print()  # Newline after progress
+                return True
+                
+        except Exception as e:
+            print(f"Download error: {e}")
+            # Clean up partial download
+            if dest.exists():
+                dest.unlink()
+            return False
     
     def delete_model(self, model_name: str) -> tuple[bool, str]:
         """
@@ -237,8 +329,10 @@ class ModelManager:
         if not model_name.endswith(".pt"):
             return False, "Only .pt files can be deleted"
         
-        if os.path.exists(model_name):
-            os.remove(model_name)
+        model_path = self._models_dir / model_name
+        
+        if model_path.exists():
+            model_path.unlink()
             if model_name in self._models:
                 del self._models[model_name]
             return True, f"Deleted {model_name}"
@@ -256,6 +350,10 @@ class ModelManager:
     def get_sam_class(self):
         """Get the SAM class for type checking."""
         return SAM
+    
+    def get_registry(self) -> Dict[str, dict]:
+        """Returns the model registry dictionary."""
+        return self._registry
 
 
 @lru_cache

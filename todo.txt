@@ -2,4 +2,6 @@ backend de modern klasör yapısına ayrılacak, işlevsellik korunuyorsa test v
 
 eğer class prompt verilmişse, detect all'u segment-text yap. Ve seçili modeli kullan, eğer yolo text ile kullanılabiliyorsa. Eğer class prompt verilmeden sam kullanılmak istenirse, kullanıcıyı uyar.
 
-simplfy çalışmıyor
+alternative options for selecting sam without text
+
+train logic, train file structure

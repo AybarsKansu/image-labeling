@@ -33,7 +33,7 @@ function App() {
   const [textPrompt, setTextPrompt] = useState('');
 
   // AI Models (model selection, training)
-  const aiModels = useAIModels('yolov8m-seg.pt', textPrompt);
+  const aiModels = useAIModels('yolov11x-seg.pt', textPrompt);
 
   // Draw tools (pen, box, knife, eraser, etc.)
   const drawTools = useDrawTools(stage, annotationsHook, textPrompt);

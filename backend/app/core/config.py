@@ -4,6 +4,7 @@ Loads values from environment variables with sensible defaults.
 """
 
 from pathlib import Path
+from typing import Optional
 from functools import lru_cache
 from pydantic_settings import BaseSettings
 from pydantic import Field
@@ -14,7 +15,7 @@ class Settings(BaseSettings):
 
     # Base paths
     BASE_DIR: Path = Field(default_factory=lambda: Path(__file__).resolve().parent.parent.parent)
-    DATASET_DIR: Path = Field(default=None)
+    DATASET_DIR: Optional[Path] = Field(default=None)
     
     # Model settings
     DEFAULT_YOLO_MODEL: str = "yolov8m-seg.pt"

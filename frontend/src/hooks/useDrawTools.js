@@ -512,10 +512,29 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
             return;
         }
 
-        const hasTextPrompt = textPrompt && textPrompt.trim().length > 0;
-        const isSamModel = selectedModel && selectedModel.toLowerCase().includes('sam');
+        // 1. State Analysis
+        const promptText = textPrompt ? textPrompt.trim() : "";
+        const hasTextPrompt = promptText.length > 0;
 
-        // VALIADTION: SAM requires a text prompt for "Detect All"
+        // We infer the model capability from its name (simple but effective)
+        const isWorldModel = selectedModel && selectedModel.toLowerCase().includes('world');
+        const isSamModel = selectedModel && selectedModel.toLowerCase().includes('sam');
+        const supportsText = isWorldModel || isSamModel;
+
+        // 2. Transparency Check
+        // If there is text but the selected model is a standard YOLO (does not support text)
+        if (hasTextPrompt && !supportsText) {
+            const confirmContinue = window.confirm(
+                `⚠️ Model Mismatch:\n\n` +
+                `You entered a text prompt ("${promptText}"), but the selected model (${selectedModel}) does not support text-based detection.\n\n` +
+                `Do you want to ignore the text and continue with standard detection (Detect All)?`
+            );
+
+            // If the user clicks "Cancel", stop the process so they can change the model
+            if (!confirmContinue) return;
+        }
+
+        // If SAM model is selected and there is no text, warn the user (SAM alone cannot do detect-all)
         if (isSamModel && !hasTextPrompt) {
             alert("SAM requires a text prompt for generic detection. Please enter a class name (e.g. 'car', 'person').");
             return;
@@ -527,35 +546,58 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
         try {
             const formData = new FormData();
             formData.append('file', imageFile);
-            formData.append('model_name', selectedModel);
-            formData.append('confidence', (confidenceThreshold / 100).toFixed(2));
 
-            // Determine endpoint based on textPrompt
-            const endpoint = hasTextPrompt ? '/segment-by-text' : '/detect-all';
+            // Endpoint and Parameter Decision
+            let endpoint = '/detect-all';
 
-            if (hasTextPrompt) {
-                formData.append('text_prompt', textPrompt.trim());
+            // If there is text AND (the model supports it OR the user accepted to continue but backend will still use text)
+            // Logic here: If it is a world model, go to the text endpoint; otherwise go to detect-all.
+
+            if (hasTextPrompt && supportsText) {
+                // --- SCENARIO A: Text-Supported Model (World/SAM) ---
+                endpoint = '/segment-by-text';
+                formData.append('text_prompt', promptText);
+                formData.append('sam_model_name', isSamModel ? selectedModel : 'sam2.1_l.pt'); // If it's World, use SAM as a helper
+                // Use frontend state values if available, otherwise defaults
+                formData.append('box_confidence', '0.25');
+                formData.append('iou_threshold', '0.45');
+            } else {
+                // --- SCENARIO B: Standard Model (YOLOv8-seg, etc.) ---
+                // Even if the user entered text, it falls back here because the model does not support it (if they confirmed)
+                endpoint = '/detect-all';
+                formData.append('model_name', selectedModel);
+                formData.append('confidence', (confidenceThreshold / 100).toFixed(2));
             }
+
+            console.log(`Sending request to ${endpoint} with model ${selectedModel}`);
 
             const res = await axios.post(`${API_URL}${endpoint}`, formData);
 
             if (res.data.detections?.length > 0) {
                 const newAnns = res.data.detections.map(d => ({
-                    id: d.id || generateId(),
+                    id: d.id || crypto.randomUUID(), // Native UUID may be safer than generateId()
                     type: 'poly',
                     points: d.points,
-                    label: d.label || (hasTextPrompt ? textPrompt.trim() : 'object'),
+                    label: d.label || (hasTextPrompt && supportsText ? promptText : 'object'),
                     originalRawPoints: d.points
                 }));
+
                 setAnnotations(prev => [...prev, ...newAnns]);
+                // Optional user feedback
+                // setSaveMessage(`✅ Found ${newAnns.length} objects`);
+            } else if (res.data.detections?.length === 0) {
+                alert("No objects found.");
             }
+
         } catch (err) {
-            console.error('Detect all failed', err);
-            alert('Detection failed: ' + (err.response?.data?.error || err.message));
+            console.error('Detection failed', err);
+            const errorMsg = err.response?.data?.detail || err.response?.data?.error || err.message;
+            alert(`Detection failed: ${errorMsg}`);
         } finally {
             setIsProcessing(false);
         }
     }, [imageFile, confidenceThreshold, textPrompt, annotations, addToHistory, setAnnotations]);
+
 
     return {
         // Tool State

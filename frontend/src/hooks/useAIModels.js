@@ -6,7 +6,7 @@ import { API_URL } from '../constants/config';
  * useAIModels Hook
  * Manages AI models, training status, and modal visibility
  */
-export const useAIModels = (initialModel = 'yolov8m-seg.pt', textPrompt) => {
+export const useAIModels = (initialModel = 'yolov11x-seg.pt', textPrompt) => {
     // --- Model State ---
     const [availableModels, setAvailableModels] = useState([initialModel]);
     const [selectedModel, setSelectedModel] = useState(initialModel);
@@ -100,30 +100,29 @@ export const useAIModels = (initialModel = 'yolov8m-seg.pt', textPrompt) => {
     }, [selectedModel]);
 
     // --- Download Model ---
-    const downloadModel = useCallback(async (modelName) => {
+    const downloadModel = useCallback(async (modelId) => {
         try {
-            const formData = new FormData();
-            formData.append('model_name', modelName);
-
-            const res = await axios.post(`${API_URL}/download-model`, formData);
+            const res = await axios.post(`${API_URL}/download-model`, {
+                model_id: modelId
+            });
 
             if (res.data.success) {
                 await fetchModels(); // Refresh model list
                 return { success: true };
             }
-            return { success: false, error: res.data.error };
+            return { success: false, error: res.data.error || res.data.message };
+
         } catch (err) {
             return { success: false, error: err.message };
         }
     }, [fetchModels]);
 
     // --- Delete Model ---
-    const deleteModel = useCallback(async (modelName) => {
+    const deleteModel = useCallback(async (modelId) => {
         try {
-            const formData = new FormData();
-            formData.append('model_name', modelName);
-
-            await axios.delete(`${API_URL}/delete-model`, { data: formData });
+            await axios.delete(`${API_URL}/delete-model`, {
+                params: { model_id: modelId }
+            });
             await fetchModels(); // Refresh model list
             return { success: true };
         } catch (err) {

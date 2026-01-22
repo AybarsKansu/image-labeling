@@ -156,7 +156,13 @@ const MainToolbar = ({
                     onClick={onDetectAll}
                     disabled={isProcessing || !imageFile}
                 >
-                    {isProcessing ? '⏳' : '🔍'} Detect All
+                    {isProcessing
+                        ? '⏳'
+                        : textPrompt && textPrompt.trim() !== ''
+                            ? '📝 Segment-text'
+                            : '🔍 Detect All'
+                    }
+
                 </button>
 
                 <div className="tooltip-container">
@@ -172,17 +178,34 @@ const MainToolbar = ({
 
             {/* Confidence Slider */}
             <div className="toolbar-section">
-                <label className="slider-label">
-                    Conf: {confidenceThreshold}%
-                    <input
-                        type="range"
-                        min="1"
-                        max="100"
-                        value={confidenceThreshold}
-                        onChange={(e) => setConfidenceThreshold(parseInt(e.target.value))}
-                        className="slider"
-                    />
-                </label>
+                <div className="confidence-header">
+                    <span className="section-label">Confidence</span>
+                    <div className="value-badge">
+                        <input
+                            type="number"
+                            min="1"
+                            max="100"
+                            value={confidenceThreshold}
+                            onChange={(e) => {
+                                let val = parseInt(e.target.value);
+                                if (val > 100) val = 100;
+                                if (val < 1) val = 1;
+                                setConfidenceThreshold(isNaN(val) ? '' : val);
+                            }}
+                            className="minimal-input"
+                        />
+                        <span className="unit">%</span>
+                    </div>
+                </div>
+
+                <input
+                    type="range"
+                    min="1"
+                    max="100"
+                    value={confidenceThreshold}
+                    onChange={(e) => setConfidenceThreshold(parseInt(e.target.value))}
+                    className="minimal-slider"
+                />
             </div>
 
             <div className="toolbar-divider" />

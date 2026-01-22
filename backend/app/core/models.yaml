@@ -1,0 +1,65 @@
+# Model Registry Configuration
+# Source of truth for available models, their types, and download URLs
+# Do NOT use Ultralytics auto-download - always use URLs defined here
+
+yolo:
+  - id: "yolov8n.pt"
+    name: "YOLOv8 Nano"
+    type: "detection"
+    url: "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.pt"
+    description: "Fastest YOLOv8 model for real-time detection. Best for simple objects."
+
+  - id: "yolov8m-seg.pt"
+    name: "YOLOv8 Medium Segmentation"
+    type: "segmentation"
+    url: "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8m-seg.pt"
+    description: "Balanced YOLOv8 model with instance segmentation. Good accuracy and speed."
+
+  - id: "yolov8x-seg.pt"
+    name: "YOLOv8 XLarge Segmentation"
+    type: "segmentation"
+    url: "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8x-seg.pt"
+    description: "Most accurate YOLOv8 segmentation model. Slower but high precision."
+
+  - id: "yolo11m-seg.pt"
+    name: "YOLO11 Medium Segmentation"
+    type: "segmentation"
+    url: "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m-seg.pt"
+    description: "YOLO11 Medium segmentation. Improved accuracy/speed over v8."
+
+  - id: "yolo11l-seg.pt"
+    name: "YOLO11 Large Segmentation"
+    type: "segmentation"
+    url: "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l-seg.pt"
+    description: "YOLO11 Large segmentation. High performance for complex scenes."
+
+  - id: "yolo11x-seg.pt"
+    name: "YOLO11 XLarge Segmentation"
+    type: "segmentation"
+    url: "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11x-seg.pt"
+    description: "State-of-the-art YOLO11 segmentation. Maximum accuracy."
+
+  - id: "yolov8l-world.pt"
+    name: "YOLOv8 Large World"
+    type: "detection"
+    url: "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8l-world.pt"
+    description: "Open-vocabulary detection model. Detects objects by text prompt."
+
+sam:
+  - id: "sam2.1_l.pt"
+    name: "SAM 2.1 Large"
+    type: "helper"
+    url: "https://github.com/ultralytics/assets/releases/download/v8.3.0/sam2.1_l.pt"
+    description: "Segment Anything Model 2.1 Large. High-quality segmentation from prompts."
+
+  - id: "sam2.1_b.pt"
+    name: "SAM 2.1 Base"
+    type: "helper"
+    url: "https://github.com/ultralytics/assets/releases/download/v8.3.0/sam2.1_b.pt"
+    description: "SAM 2.1 Base model. Good balance for general segmentation."
+
+  - id: "sam2.1_t.pt"
+    name: "SAM 2.1 Tiny"
+    type: "helper"
+    url: "https://github.com/ultralytics/assets/releases/download/v8.3.0/sam2.1_t.pt"
+    description: "SAM 2.1 Tiny model. Fastest SAM variant."
