@@ -1598,7 +1598,7 @@
 //                                     fontWeight: 'bold'
 //                                 }}
 //                             >
-//                                 {isProcessing ? '⏳ Detecting...' : (textPrompt ? '🪄 Segment Text' : '👁️ Detect All')}
+//                                 {isProcessing ? '⏳ Detecting...' : (textPrompt ? '🪄 Segment Text' : '👁️ ')}
 //                             </button>
 //                             <button
 //                                 onClick={handleSaveAnnotation}

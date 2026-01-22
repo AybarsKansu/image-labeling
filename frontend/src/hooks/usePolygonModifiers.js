@@ -6,128 +6,149 @@ import { simplifyPoints, densifyPoints } from '../utils/geometry';
 /**
  * usePolygonModifiers Hook
  * Provides polygon editing operations: simplify, densify, reset, beautify
+ * Updated for Multi-Selection ID-based state
  */
 export const usePolygonModifiers = (annotationsHook, stageHook) => {
     const {
         annotations,
-        selectedIndex,
+        selectedIds,
         addToHistory,
         setAnnotations
     } = annotationsHook;
 
     const { imageFile } = stageHook || {};
 
+    // --- Helper: Update specific annotations by ID ---
+    const updateSelectedAnnotations = useCallback((updater) => {
+        if (!selectedIds || selectedIds.length === 0) return false;
+
+        addToHistory(annotations);
+        const newAnns = annotations.map(ann => {
+            if (selectedIds.includes(ann.id)) {
+                return updater(ann);
+            }
+            return ann;
+        });
+        setAnnotations(newAnns);
+        return true;
+    }, [annotations, selectedIds, addToHistory, setAnnotations]);
+
     // --- Simplify (Ramer-Douglas-Peucker) ---
     const handleSimplify = useCallback((tolerance = 2.0) => {
-        if (selectedIndex === null) return false;
+        if (!selectedIds || selectedIds.length === 0) return false;
 
-        const ann = annotations[selectedIndex];
-        if (ann.type !== 'poly' || !ann.points || ann.points.length <= 6) {
-            return false;
-        }
+        return updateSelectedAnnotations((ann) => {
+            if (ann.type !== 'poly' || !ann.points || ann.points.length <= 6) return ann;
 
-        // Preserve original if not already saved
-        const raw = ann.originalRawPoints || ann.points;
-        const newPoints = simplifyPoints(ann.points, tolerance);
+            // Preserve original
+            const raw = ann.originalRawPoints || ann.points;
+            const newPoints = simplifyPoints(ann.points, tolerance);
 
-        if (newPoints.length >= 6) { // Ensure valid polygon
-            addToHistory(annotations);
-            const newAnns = [...annotations];
-            newAnns[selectedIndex] = {
-                ...ann,
-                points: newPoints,
-                originalRawPoints: raw
-            };
-            setAnnotations(newAnns);
-            console.log(`Simplified from ${ann.points.length / 2} to ${newPoints.length / 2} points`);
-            return true;
-        }
-        return false;
-    }, [annotations, selectedIndex, addToHistory, setAnnotations]);
-
-    // --- Densify (Add midpoints) ---
-    const handleDensify = useCallback(() => {
-        if (selectedIndex === null) return false;
-
-        const ann = annotations[selectedIndex];
-        if (ann.type !== 'poly' || !ann.points || ann.points.length < 4) {
-            return false;
-        }
-
-        const raw = ann.originalRawPoints || ann.points;
-        const newPoints = densifyPoints(ann.points);
-
-        addToHistory(annotations);
-        const newAnns = [...annotations];
-        newAnns[selectedIndex] = {
-            ...ann,
-            points: newPoints,
-            originalRawPoints: raw
-        };
-        setAnnotations(newAnns);
-        console.log(`Densified from ${ann.points.length / 2} to ${newPoints.length / 2} points`);
-        return true;
-    }, [annotations, selectedIndex, addToHistory, setAnnotations]);
-
-    // --- Reset (Restore original points) ---
-    const handleReset = useCallback(() => {
-        if (selectedIndex === null) return false;
-
-        const ann = annotations[selectedIndex];
-        if (!ann.originalRawPoints) {
-            console.log('No original points to reset to');
-            return false;
-        }
-
-        addToHistory(annotations);
-        const newAnns = [...annotations];
-        newAnns[selectedIndex] = {
-            ...ann,
-            points: [...ann.originalRawPoints] // Clone to avoid reference issues
-        };
-        setAnnotations(newAnns);
-        console.log('Reset to original points');
-        return true;
-    }, [annotations, selectedIndex, addToHistory, setAnnotations]);
-
-    // --- Beautify (AI refinement) ---
-    const handleBeautify = useCallback(async (selectedModel, setIsProcessing) => {
-        if (selectedIndex === null || !imageFile) {
-            return { success: false, error: 'No selection or image' };
-        }
-
-        const ann = annotations[selectedIndex];
-        if (ann.type !== 'poly' || !ann.points || ann.points.length < 6) {
-            return { success: false, error: 'Invalid polygon' };
-        }
-
-        if (setIsProcessing) setIsProcessing(true);
-
-        try {
-            const formData = new FormData();
-            formData.append('file', imageFile);
-            formData.append('points_json', JSON.stringify(ann.points));
-            formData.append('model_name', selectedModel);
-
-            const res = await axios.post(`${API_URL}/refine-polygon`, formData);
-
-            if (res.data.points) {
-                const newPoints = res.data.points;
-                const raw = ann.originalRawPoints || ann.points;
-
-                addToHistory(annotations);
-                const newAnns = [...annotations];
-                newAnns[selectedIndex] = {
+            if (newPoints.length >= 6) {
+                return {
                     ...ann,
                     points: newPoints,
                     originalRawPoints: raw
                 };
-                setAnnotations(newAnns);
-                console.log('Beautify success');
+            }
+            return ann;
+        });
+    }, [selectedIds, updateSelectedAnnotations]);
+
+    // --- Densify (Add midpoints) ---
+    const handleDensify = useCallback(() => {
+        if (!selectedIds || selectedIds.length === 0) return false;
+
+        return updateSelectedAnnotations((ann) => {
+            if (ann.type !== 'poly' || !ann.points || ann.points.length < 4) return ann;
+
+            const raw = ann.originalRawPoints || ann.points;
+            const newPoints = densifyPoints(ann.points);
+
+            return {
+                ...ann,
+                points: newPoints,
+                originalRawPoints: raw
+            };
+        });
+    }, [selectedIds, updateSelectedAnnotations]);
+
+    // --- Reset (Restore original points) ---
+    const handleReset = useCallback(() => {
+        if (!selectedIds || selectedIds.length === 0) return false;
+
+        return updateSelectedAnnotations((ann) => {
+            if (!ann.originalRawPoints) return ann;
+            return {
+                ...ann,
+                points: [...ann.originalRawPoints]
+            };
+        });
+    }, [selectedIds, updateSelectedAnnotations]);
+
+    // --- Beautify (AI refinement) ---
+    // Note: This involves async API calls. Doing parallel requests might be heavy.
+    // For now, let's limit to the first selected item or sequential.
+    // Let's do sequential for safety.
+    const handleBeautify = useCallback(async (selectedModel, setIsProcessing) => {
+        if (!selectedIds || selectedIds.length === 0 || !imageFile) {
+            return { success: false, error: 'No selection or image' };
+        }
+
+        if (setIsProcessing) setIsProcessing(true);
+
+        // We'll process only valid polygons
+        const targets = annotations.filter(a => selectedIds.includes(a.id) && a.type === 'poly' && a.points.length >= 6);
+
+        if (targets.length === 0) {
+            if (setIsProcessing) setIsProcessing(false);
+            return { success: false, error: 'No valid polygons selected' };
+        }
+
+        addToHistory(annotations);
+        // We will build a new annotations array
+        // But since we have async await in loop, we need to be careful with state updates.
+        // Better strategy: fetch all updates then update state once.
+
+        try {
+            const updates = {}; // map id -> newPoints
+
+            // Limit to first 5 to prevent overload if user selects 100 items
+            const processList = targets.slice(0, 5);
+
+            for (const ann of processList) {
+                const formData = new FormData();
+                formData.append('file', imageFile);
+                formData.append('points_json', JSON.stringify(ann.points));
+                formData.append('model_name', selectedModel);
+
+                try {
+                    const res = await axios.post(`${API_URL}/refine-polygon`, formData);
+                    if (res.data.points) {
+                        updates[ann.id] = res.data.points;
+                    }
+                } catch (e) {
+                    console.error(`Beautify failed for ${ann.id}`, e);
+                }
+            }
+
+            if (Object.keys(updates).length > 0) {
+                setAnnotations(prev => prev.map(ann => {
+                    if (updates[ann.id]) {
+                        const raw = ann.originalRawPoints || ann.points;
+                        return {
+                            ...ann,
+                            points: updates[ann.id],
+                            originalRawPoints: raw
+                        };
+                    }
+                    return ann;
+                }));
                 return { success: true };
             } else {
-                return { success: false, error: 'Could not refine shape' };
+                return { success: false, error: 'Could not refine any shapes' };
             }
+
         } catch (err) {
             console.error('Beautify failed', err);
             return {
@@ -137,7 +158,7 @@ export const usePolygonModifiers = (annotationsHook, stageHook) => {
         } finally {
             if (setIsProcessing) setIsProcessing(false);
         }
-    }, [annotations, selectedIndex, imageFile, addToHistory, setAnnotations]);
+    }, [annotations, selectedIds, imageFile, addToHistory, setAnnotations]);
 
     return {
         handleSimplify,
@@ -145,12 +166,9 @@ export const usePolygonModifiers = (annotationsHook, stageHook) => {
         handleReset,
         handleBeautify,
 
-        // Info
-        canModify: selectedIndex !== null &&
-            annotations[selectedIndex]?.type === 'poly' &&
-            annotations[selectedIndex]?.points?.length >= 6,
-        canReset: selectedIndex !== null &&
-            !!annotations[selectedIndex]?.originalRawPoints
+        // Info (Checked against at least one selected item supports it)
+        canModify: selectedIds && selectedIds.length > 0,
+        canReset: selectedIds && selectedIds.length > 0 // simplified check
     };
 };
 

@@ -1,7 +1,3 @@
-backend de modern klasör yapısına ayrılacak, işlevsellik korunuyorsa test ve rapor işlemleri başlayabilir.
-
-eğer class prompt verilmişse, detect all'u segment-text yap. Ve seçili modeli kullan, eğer yolo text ile kullanılabiliyorsa. Eğer class prompt verilmeden sam kullanılmak istenirse, kullanıcıyı uyar.
-
-alternative options for selecting sam without text
-
 train logic, train file structure
+
+model parameters definitely revisited

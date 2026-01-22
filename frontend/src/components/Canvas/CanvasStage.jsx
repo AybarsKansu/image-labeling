@@ -18,7 +18,7 @@ const CanvasStage = ({
 
     // Annotations
     annotations,
-    selectedIndex,
+    selectedIds,
     filterText,
 
     // Tool state
@@ -102,7 +102,7 @@ const CanvasStage = ({
 
                     {/* Annotations */}
                     {filteredAnnotations.map((ann, i) => {
-                        const isSelected = selectedIndex === i;
+                        const isSelected = selectedIds && selectedIds.includes(ann.id);
 
                         // Validate points
                         if (!ann.points || ann.points.length < 4) return null;
@@ -117,11 +117,13 @@ const CanvasStage = ({
                         const isPenDrawn = ann.isPenDrawn === true;
 
                         // Get stroke color (from annotation or generate from label)
-                        const strokeColor = ann.color || stringToColor(ann.label || 'unknown');
+                        // HIGH CONTRAST for selected: Neon Red #FF0040
+                        const baseColor = ann.color || stringToColor(ann.label || 'unknown');
+                        const strokeColor = isSelected ? '#FF0040' : baseColor;
 
                         // Fill is stroke color with low opacity (10% normal, 30% selected)
                         // Pen drawn shapes have no fill
-                        const fillColor = isPenDrawn ? null : (isSelected ? `${strokeColor}4D` : `${strokeColor}1A`);
+                        const fillColor = isPenDrawn ? null : (isSelected ? `${baseColor}4D` : `${baseColor}1A`);
 
                         return (
                             <React.Fragment key={ann.id || i}>
@@ -160,7 +162,7 @@ const CanvasStage = ({
                                             y={ann.points[pi + 1]}
                                             radius={5}
                                             fill="#fff"
-                                            stroke={strokeColor}
+                                            stroke={strokeColor} // Use high contrast color
                                             strokeWidth={2}
                                             draggable={true}
                                             onDragMove={(e) => onVertexDrag(e, i, pi)}

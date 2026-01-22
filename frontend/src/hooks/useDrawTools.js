@@ -95,9 +95,9 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
                 label: 'unknown',
                 originalRawPoints: currentPolyPoints.flatMap(p => [p.x, p.y])
             };
-            const newIndex = addAnnotation(newAnn);
+            const newId = addAnnotation(newAnn);
             setCurrentPolyPoints([]);
-            selectAnnotation(newIndex);
+            selectAnnotation(newId);
             justFinishedDrawingRef.current = true;
             setTool('select');
         }
@@ -129,13 +129,6 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
         }
 
         if (tool === 'select' || tool === 'pan') {
-            const clickedIndex = getClickedShape(pos);
-            if (clickedIndex !== null && tool !== 'pan') {
-                selectAnnotation(clickedIndex);
-            } else {
-                clearSelection();
-            }
-
             if (tool === 'pan') {
                 startPosRef.current = stageRef.current.getPointerPosition();
                 setIsDrawing(true);
@@ -288,8 +281,8 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
                     originalRawPoints: [...currentPenPoints],
                     isPenDrawn: true  // Mark as pen-drawn (no fill, open path)
                 };
-                const newIndex = addAnnotation(newAnn);
-                selectAnnotation(newIndex);
+                const newId = addAnnotation(newAnn);
+                selectAnnotation(newId);
                 justFinishedDrawingRef.current = true;
             }
             setCurrentPenPoints([]);
@@ -370,8 +363,8 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
                         tempAnnotation.x, tempAnnotation.y + tempAnnotation.height
                     ]
                 };
-                const newIndex = addAnnotation(rect);
-                selectAnnotation(newIndex);
+                const newId = addAnnotation(rect);
+                selectAnnotation(newId);
                 justFinishedDrawingRef.current = true;
             }
             setTempAnnotation(null);
@@ -418,8 +411,10 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
                         suggestions: d.suggestions || [],
                         originalRawPoints: d.points
                     }));
-                    const lastIndex = addAnnotations(newAnns);
-                    selectAnnotation(lastIndex);
+                    const newIds = addAnnotations(newAnns);
+                    // Select all new annotations (optional, logic might vary, select last or all)
+                    // For now, select the last one or clear selection
+                    if (newIds.length > 0) selectAnnotation(newIds[newIds.length - 1]);
                     justFinishedDrawingRef.current = true;
                 }
             } catch (err) {
@@ -460,9 +455,9 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
                         label: 'unknown',
                         originalRawPoints: currentPolyPoints.flatMap(p => [p.x, p.y])
                     };
-                    const newIndex = addAnnotation(newAnn);
+                    const newId = addAnnotation(newAnn);
                     setCurrentPolyPoints([]);
-                    selectAnnotation(newIndex);
+                    selectAnnotation(newId);
                     justFinishedDrawingRef.current = true;
                     return;
                 }
@@ -472,13 +467,18 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt) => {
             clearSelection();
         } else {
             const clickedIndex = getClickedShape(pos);
+            const isMultiSelect = e.evt.ctrlKey || e.evt.metaKey;
+
             if (clickedIndex !== null) {
-                selectAnnotation(clickedIndex);
+                const annId = annotations[clickedIndex].id;
+                selectAnnotation(annId, isMultiSelect);
             } else {
-                clearSelection();
+                if (!isMultiSelect) {
+                    clearSelection();
+                }
             }
         }
-    }, [tool, currentPolyPoints, getRelativePointerPosition, addAnnotation, selectAnnotation, clearSelection, getClickedShape]);
+    }, [tool, currentPolyPoints, getRelativePointerPosition, addAnnotation, selectAnnotation, clearSelection, getClickedShape, annotations]);
 
     // --- Vertex Drag Handler ---
     const handleVertexDrag = useCallback((e, polyIndex, pointIndex) => {

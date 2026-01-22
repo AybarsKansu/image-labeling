@@ -1,20 +1,34 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { deepClone } from '../utils/helpers';
 
 /**
  * useAnnotations Hook
  * Manages annotations state, selection, and history (undo/redo)
+ * Updated for Multi-Selection
  */
 export const useAnnotations = () => {
     // --- State ---
     const [annotations, setAnnotations] = useState([]);
-    const [selectedIndex, setSelectedIndex] = useState(null);
+    const [selectedIds, setSelectedIds] = useState([]); // Array of IDs
     const [selectedLabel, setSelectedLabel] = useState('');
     const [history, setHistory] = useState([]); // Undo stack
     const [future, setFuture] = useState([]); // Redo stack
 
     // --- Computed ---
-    const selectedAnn = selectedIndex !== null ? annotations[selectedIndex] : null;
+    // If one is selected, return it. If multiple, return the last one (or handle differently)
+    // For backward compatibility with some components, we can return the last selected one as "selectedAnn"
+    // but consumers should preferably use selectedIds
+    const selectedAnn = useMemo(() => {
+        if (selectedIds.length === 1) {
+            return annotations.find(a => a.id === selectedIds[0]) || null;
+        }
+        return null; // Or return undefined if multiple/none
+    }, [annotations, selectedIds]);
+
+    // Helper to get all selected objects
+    const selectedAnns = useMemo(() => {
+        return annotations.filter(a => selectedIds.includes(a.id));
+    }, [annotations, selectedIds]);
 
     // --- Add to History (for undo support) ---
     const addToHistory = useCallback((currentAnns) => {
@@ -30,7 +44,7 @@ export const useAnnotations = () => {
             setFuture(prev => [...prev, deepClone(annotations)]); // Save current to future
             setAnnotations(previousState);
             setHistory(prev => prev.slice(0, -1));
-            setSelectedIndex(null);
+            setSelectedIds([]);
             setSelectedLabel('');
         }
     }, [history, annotations]);
@@ -42,7 +56,7 @@ export const useAnnotations = () => {
             setHistory(prev => [...prev, deepClone(annotations)]);
             setAnnotations(nextState);
             setFuture(prev => prev.slice(0, -1));
-            setSelectedIndex(null);
+            setSelectedIds([]);
             setSelectedLabel('');
         }
     }, [future, annotations]);
@@ -52,86 +66,100 @@ export const useAnnotations = () => {
         if (confirm('Delete all annotations?')) {
             addToHistory(annotations);
             setAnnotations([]);
-            setSelectedIndex(null);
+            setSelectedIds([]);
             setSelectedLabel('');
         }
     }, [annotations, addToHistory]);
 
     // --- Update Label ---
     const updateLabel = useCallback((newLabel) => {
-        if (selectedIndex !== null) {
+        if (selectedIds.length > 0) {
             addToHistory(annotations);
-            const updated = [...annotations];
-            updated[selectedIndex] = { ...updated[selectedIndex], label: newLabel };
-            setAnnotations(updated);
+            setAnnotations(prev => prev.map(ann =>
+                selectedIds.includes(ann.id) ? { ...ann, label: newLabel } : ann
+            ));
             setSelectedLabel(newLabel);
         }
-    }, [selectedIndex, annotations, addToHistory]);
+    }, [selectedIds, annotations, addToHistory]);
 
     // --- Delete Selected ---
     const deleteSelected = useCallback(() => {
-        if (selectedIndex !== null) {
+        if (selectedIds.length > 0) {
             addToHistory(annotations);
-            setAnnotations(annotations.filter((_, i) => i !== selectedIndex));
-            setSelectedIndex(null);
+            setAnnotations(prev => prev.filter(ann => !selectedIds.includes(ann.id)));
+            setSelectedIds([]);
             setSelectedLabel('');
         }
-    }, [selectedIndex, annotations, addToHistory]);
+    }, [selectedIds, annotations, addToHistory]);
 
     // --- Add Annotation ---
     const addAnnotation = useCallback((newAnn) => {
         addToHistory(annotations);
         setAnnotations(prev => [...prev, newAnn]);
-        return annotations.length; // Return index of new annotation
+        return newAnn.id; // Return ID instead of index
     }, [annotations, addToHistory]);
 
     // --- Add Multiple Annotations ---
     const addAnnotations = useCallback((newAnns) => {
         addToHistory(annotations);
         setAnnotations(prev => [...prev, ...newAnns]);
-        return annotations.length + newAnns.length - 1; // Return index of last new annotation
+        return newAnns.map(a => a.id);
     }, [annotations, addToHistory]);
 
     // --- Update Annotation ---
-    const updateAnnotation = useCallback((index, updates) => {
-        if (index >= 0 && index < annotations.length) {
-            const newAnns = [...annotations];
-            newAnns[index] = { ...newAnns[index], ...updates };
-            setAnnotations(newAnns);
-        }
-    }, [annotations]);
+    const updateAnnotation = useCallback((indexOrId, updates) => {
+        // Handle both index (legacy) and ID
+        setAnnotations(prev => {
+            const newAnns = [...prev];
+            let idx = -1;
+            if (typeof indexOrId === 'number') {
+                idx = indexOrId;
+            } else {
+                idx = newAnns.findIndex(a => a.id === indexOrId);
+            }
+
+            if (idx !== -1) {
+                newAnns[idx] = { ...newAnns[idx], ...updates };
+                return newAnns;
+            }
+            return prev;
+        });
+    }, []);
 
     // --- Update Annotation with History ---
-    const updateAnnotationWithHistory = useCallback((index, updates) => {
-        if (index >= 0 && index < annotations.length) {
-            addToHistory(annotations);
-            const newAnns = [...annotations];
-            newAnns[index] = { ...newAnns[index], ...updates };
-            setAnnotations(newAnns);
-        }
-    }, [annotations, addToHistory]);
+    const updateAnnotationWithHistory = useCallback((indexOrId, updates) => {
+        addToHistory(annotations);
+        updateAnnotation(indexOrId, updates);
+    }, [annotations, addToHistory, updateAnnotation]);
 
     // --- Replace Annotation at Index ---
     const replaceAnnotation = useCallback((index, newAnn) => {
-        if (index >= 0 && index < annotations.length) {
-            addToHistory(annotations);
-            const newAnns = [...annotations];
-            newAnns[index] = newAnn;
-            setAnnotations(newAnns);
-        }
+        addToHistory(annotations);
+        setAnnotations(prev => {
+            const newAnns = [...prev];
+            if (index >= 0 && index < newAnns.length) {
+                newAnns[index] = newAnn;
+            }
+            return newAnns;
+        });
     }, [annotations, addToHistory]);
 
     // --- Remove Annotation at Index ---
     const removeAnnotation = useCallback((index) => {
-        if (index >= 0 && index < annotations.length) {
-            addToHistory(annotations);
-            setAnnotations(annotations.filter((_, i) => i !== index));
-            if (selectedIndex === index) {
-                setSelectedIndex(null);
-                setSelectedLabel('');
+        addToHistory(annotations);
+        setAnnotations(prev => {
+            const annToRemove = prev[index];
+            if (!annToRemove) return prev;
+
+            const newAnns = prev.filter((_, i) => i !== index);
+
+            // If removed one was selected, deselect it
+            if (selectedIds.includes(annToRemove.id)) {
+                setSelectedIds(ids => ids.filter(id => id !== annToRemove.id));
             }
-        }
-    }, [annotations, selectedIndex, addToHistory]);
+            return newAnns;
+        });
+    }, [annotations, addToHistory, selectedIds]);
 
     // --- Splice and Insert (for knife tool) ---
     const spliceAndInsert = useCallback((removeIndex, newAnns) => {
@@ -139,30 +167,42 @@ export const useAnnotations = () => {
         const result = [...annotations];
         result.splice(removeIndex, 1, ...newAnns);
         setAnnotations(result);
-        setSelectedIndex(null);
+        setSelectedIds([]);
     }, [annotations, addToHistory]);
 
     // --- Select Annotation ---
-    const selectAnnotation = useCallback((index) => {
-        if (index !== null && index >= 0 && index < annotations.length) {
-            setSelectedIndex(index);
-            setSelectedLabel(annotations[index].label || '');
+    // Updated signature: (id, multiSelect)
+    const selectAnnotation = useCallback((id, multiSelect = false) => {
+        if (!id) {
+            if (!multiSelect) setSelectedIds([]);
+            return;
+        }
+
+        if (multiSelect) {
+            setSelectedIds(prev => {
+                const newIds = prev.includes(id)
+                    ? prev.filter(i => i !== id)
+                    : [...prev, id];
+                return newIds;
+            });
         } else {
-            setSelectedIndex(null);
-            setSelectedLabel('');
+            setSelectedIds([id]);
+            // Also update label if single selection
+            const ann = annotations.find(a => a.id === id);
+            if (ann) setSelectedLabel(ann.label || '');
         }
     }, [annotations]);
 
     // --- Clear Selection ---
     const clearSelection = useCallback(() => {
-        setSelectedIndex(null);
+        setSelectedIds([]);
         setSelectedLabel('');
     }, []);
 
     // --- Reset (clear all without history) ---
     const reset = useCallback(() => {
         setAnnotations([]);
-        setSelectedIndex(null);
+        setSelectedIds([]);
         setSelectedLabel('');
         setHistory([]);
         setFuture([]);
@@ -171,9 +211,11 @@ export const useAnnotations = () => {
     return {
         // State
         annotations,
-        selectedIndex,
+        selectedIds,       // REPLACED selectedIndex
+        selectedIndex: null, // Deprecated/Removed
         selectedLabel,
-        selectedAnn,
+        selectedAnn,       // Computed (single or null)
+        selectedAnns,      // New: All selected objects
         history,
         future,
 
@@ -199,9 +241,9 @@ export const useAnnotations = () => {
         clearSelection,
         reset,
 
-        // Direct setters (for bulk operations)
+        // Direct setters
         setAnnotations,
-        setSelectedIndex,
+        setSelectedIds,
         setSelectedLabel
     };
 };

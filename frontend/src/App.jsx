@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
+import * as turf from '@turf/turf';
 import './App.css';
 
 // Custom Hooks
@@ -12,11 +13,12 @@ import { usePolygonModifiers } from './hooks/usePolygonModifiers';
 // Components
 import { CanvasStage } from './components/Canvas';
 import { MainToolbar } from './components/Toolbar';
-import { FloatingPanel, PropertiesPanel } from './components/Panels';
+import { FloatingPanel, PropertiesPanel, FloatingSelectionMenu } from './components/Panels';
 import { SettingsModal, ModelManagerModal, PreprocessingModal, TrainPanel } from './components/Modals';
 
 // Config
 import { API_URL } from './constants/config';
+import { generateId } from './utils/helpers';
 
 function App() {
   // ============================================
@@ -58,8 +60,161 @@ function App() {
 
 
   // ============================================
+  // HELPER: Selection Menu Position
+  // ============================================
+  const menuPosition = useMemo(() => {
+    if (annotationsHook.selectedIds.length < 2 || !stage.imageObj) return null;
+
+    const selectedAnns = annotationsHook.selectedAnns;
+    if (selectedAnns.length < 2) return null;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    selectedAnns.forEach(ann => {
+      if (!ann.points) return;
+      for (let i = 0; i < ann.points.length; i += 2) {
+        const x = ann.points[i];
+        const y = ann.points[i + 1];
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    });
+
+    if (!isFinite(minX)) return null;
+
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2; // Position at the top edge of bounding box? Or center? User said center.
+
+    // Convert to screen coordinates
+    // screen = (image * scale) + offset
+    const screenX = (centerX * stage.imageLayout.scale) + stage.imageLayout.x;
+    const screenY = (centerY * stage.imageLayout.scale) + stage.imageLayout.y;
+
+    return { x: screenX, y: screenY };
+  }, [annotationsHook.selectedIds, annotationsHook.selectedAnns, stage.imageLayout, stage.imageObj]);
+
+
+  // ============================================
   // EVENT HANDLERS
   // ============================================
+
+  // Handle Merge
+  const handleMerge = useCallback(async (type) => {
+    const selectedAnns = annotationsHook.selectedAnns;
+    if (selectedAnns.length < 2) return;
+
+    if (type === 'geometric') {
+      try {
+        const polygons = selectedAnns.map(ann => {
+          // Convert flat points to GeoJSON
+          const coords = [];
+          for (let i = 0; i < ann.points.length; i += 2) {
+            coords.push([ann.points[i], ann.points[i + 1]]);
+          }
+          // Close ring
+          if (coords.length > 0) {
+            const first = coords[0];
+            const last = coords[coords.length - 1];
+            if (first[0] !== last[0] || first[1] !== last[1]) {
+              coords.push(first);
+            }
+          }
+          return turf.polygon([coords]);
+        });
+
+        // Merge iteratively
+        let merged = polygons[0];
+        for (let i = 1; i < polygons.length; i++) {
+          merged = turf.union(merged, polygons[i]);
+        }
+
+        if (merged) {
+          const newAnns = [];
+          const geometry = merged.geometry;
+
+          if (geometry.type === 'Polygon') {
+            newAnns.push({
+              points: geometry.coordinates[0].flatMap(p => [p[0], p[1]])
+            });
+          } else if (geometry.type === 'MultiPolygon') {
+            geometry.coordinates.forEach(poly => {
+              newAnns.push({
+                points: poly[0].flatMap(p => [p[0], p[1]])
+              });
+            });
+          }
+
+          // Create full annotation objects
+          const finalAnns = newAnns.map(a => ({
+            id: generateId(),
+            type: 'poly',
+            points: a.points,
+            label: selectedAnns[0].label,
+            originalRawPoints: a.points
+          }));
+
+          // Replace in state
+          annotationsHook.deleteSelected();
+          annotationsHook.addAnnotations(finalAnns);
+        }
+      } catch (err) {
+        console.error("Merge failed", err);
+        alert("Geometric merge failed: " + err.message);
+      }
+    } else if (type === 'smart') {
+      // Smart AI Merge
+      drawTools.setIsProcessing(true);
+      try {
+        // Calculate Super BBox
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        selectedAnns.forEach(ann => {
+          if (!ann.points) return;
+          for (let i = 0; i < ann.points.length; i += 2) {
+            minX = Math.min(minX, ann.points[i]);
+            maxX = Math.max(maxX, ann.points[i]);
+            minY = Math.min(minY, ann.points[i + 1]);
+            maxY = Math.max(maxY, ann.points[i + 1]);
+          }
+        });
+
+        const width = maxX - minX;
+        const height = maxY - minY;
+
+        const formData = new FormData();
+        formData.append('file', stage.imageFile);
+        formData.append('box_json', JSON.stringify([minX, minY, width, height]));
+        formData.append('model_name', 'sam2.1_l.pt'); // Explicit requirement
+        formData.append('confidence', '0.25'); // Default
+
+        // Use label from first selection as hint if needed? Protocol doesn't specify text prompt for merge.
+
+        const res = await axios.post(`${API_URL}/segment-box`, formData);
+
+        if (res.data.detections && res.data.detections.length > 0) {
+          const newAnns = res.data.detections.map(d => ({
+            id: d.id || generateId(),
+            type: 'poly',
+            points: d.points,
+            label: selectedAnns[0].label, // Keep original label
+            originalRawPoints: d.points
+          }));
+
+          annotationsHook.deleteSelected();
+          const newIds = annotationsHook.addAnnotations(newAnns);
+          // Select the new one(s)
+          if (newIds.length > 0) annotationsHook.selectAnnotation(newIds[0]);
+        }
+      } catch (err) {
+        console.error("Smart merge failed", err);
+        alert("Smart merge failed.");
+      } finally {
+        drawTools.setIsProcessing(false);
+      }
+    }
+  }, [annotationsHook, stage.imageFile, drawTools]);
+
 
   // Handle image upload
   const handleImageUpload = useCallback((e) => {
@@ -169,7 +324,7 @@ function App() {
           drawTools.setCurrentPolyPoints([]);
         } else if (drawTools.isDrawing) {
           drawTools.resetToolState();
-        } else if (annotationsHook.selectedIndex !== null) {
+        } else if (annotationsHook.selectedIds.length > 0) {
           annotationsHook.clearSelection();
         } else if (drawTools.tool !== 'select') {
           drawTools.setTool('select');
@@ -191,7 +346,7 @@ function App() {
           return;
         }
         // Otherwise, delete selected annotation
-        if (annotationsHook.selectedIndex !== null) {
+        if (annotationsHook.selectedIds.length > 0) {
           annotationsHook.deleteSelected();
         }
       }
@@ -256,7 +411,7 @@ function App() {
         imageObj={stage.imageObj}
         imageLayout={stage.imageLayout}
         annotations={annotationsHook.annotations}
-        selectedIndex={annotationsHook.selectedIndex}
+        selectedIds={annotationsHook.selectedIds}
         filterText={drawTools.filterText}
         tool={drawTools.tool}
         tempAnnotation={drawTools.tempAnnotation}
@@ -281,6 +436,15 @@ function App() {
           filterText={drawTools.filterText}
           setFilterText={drawTools.setFilterText}
           onSelectLabel={(label) => drawTools.setFilterText(label)}
+        />
+      )}
+
+      {/* Floating Selection Menu */}
+      {menuPosition && (
+        <FloatingSelectionMenu
+          position={menuPosition}
+          selectedCount={annotationsHook.selectedIds.length}
+          onMerge={handleMerge}
         />
       )}
 
