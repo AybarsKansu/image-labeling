@@ -10,10 +10,12 @@ const FloatingPanel = ({
     annotations,
     filterText,
     setFilterText,
-    onSelectLabel
+    onSelectLabel,
+    onToggle, // Callback for parent when docked
+    docked = false // Default to false for backward compatibility
 }) => {
     // Panel position and size
-    const [panelPos, setPanelPos] = useState({ x: 20, y: 20 });
+    const [panelPos, setPanelPos] = useState({ x: 20, y: 80 });
     const [panelSize, setPanelSize] = useState({ width: 280, height: 200 });
     const [isDragging, setIsDragging] = useState(false);
     const [isResizing, setIsResizing] = useState(false);
@@ -34,6 +36,8 @@ const FloatingPanel = ({
 
     // Handle drag and resize
     useEffect(() => {
+        if (docked) return; // Disable all drag/resize logic when docked
+
         const handleMouseMove = (e) => {
             if (isDragging) {
                 setPanelPos({
@@ -62,9 +66,10 @@ const FloatingPanel = ({
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [isDragging, isResizing]);
+    }, [isDragging, isResizing, docked]);
 
     const handleDragStart = (e) => {
+        if (docked) return;
         dragOffset.current = {
             x: e.clientX - panelPos.x,
             y: e.clientY - panelPos.y
@@ -73,6 +78,7 @@ const FloatingPanel = ({
     };
 
     const handleResizeStart = (e) => {
+        if (docked) return;
         e.stopPropagation();
         resizeStart.current = {
             x: e.clientX,
@@ -85,8 +91,8 @@ const FloatingPanel = ({
 
     return (
         <div
-            className="floating-panel"
-            style={{
+            className={`floating-panel ${docked ? 'docked' : ''}`}
+            style={docked ? {} : {
                 left: panelPos.x,
                 top: panelPos.y,
                 width: panelSize.width,
@@ -99,62 +105,52 @@ const FloatingPanel = ({
                 onMouseDown={handleDragStart}
             >
                 <span className="panel-title">📊 Detected Labels</span>
-                <div className="panel-controls">
-                    <button
-                        className="panel-btn"
-                        onClick={() => setIsCollapsed(!isCollapsed)}
-                    >
-                        {isCollapsed ? '▼' : '▲'}
-                    </button>
-                </div>
             </div>
 
-            {!isCollapsed && (
-                <>
-                    {/* Filter Input */}
-                    <div className="panel-filter">
-                        <input
-                            type="text"
-                            placeholder="Filter labels..."
-                            value={filterText}
-                            onChange={(e) => setFilterText(e.target.value)}
-                            className="filter-input"
-                        />
-                    </div>
+            {/* Filter Input */}
+            <div className="panel-filter">
+                <input
+                    type="text"
+                    placeholder="Filter labels..."
+                    value={filterText}
+                    onChange={(e) => setFilterText(e.target.value)}
+                    className="filter-input"
+                />
+            </div>
 
-                    {/* Label List */}
-                    <div className="panel-content">
-                        {labelStats.length === 0 ? (
-                            <p className="empty-message">No annotations yet</p>
-                        ) : (
-                            labelStats.map(([label, count]) => (
-                                <div
-                                    key={label}
-                                    className="label-item"
-                                    onClick={() => onSelectLabel && onSelectLabel(label)}
-                                >
-                                    <div
-                                        className="label-color"
-                                        style={{ background: stringToColor(label) }}
-                                    />
-                                    <span className="label-name">{label}</span>
-                                    <span className="label-count">{count}</span>
-                                </div>
-                            ))
-                        )}
-                    </div>
+            {/* Label List */}
+            <div className="panel-content">
+                {labelStats.length === 0 ? (
+                    <p className="empty-message">No annotations yet</p>
+                ) : (
+                    labelStats.map(([label, count]) => (
+                        <div
+                            key={label}
+                            className="label-item"
+                            onClick={() => onSelectLabel && onSelectLabel(label)}
+                        >
+                            <div
+                                className="label-color"
+                                style={{ background: stringToColor(label) }}
+                            />
+                            <span className="label-name">{label}</span>
+                            <span className="label-count">{count}</span>
+                        </div>
+                    ))
+                )}
+            </div>
 
-                    {/* Total Count */}
-                    <div className="panel-footer">
-                        Total: {annotations.length} shapes
-                    </div>
+            {/* Total Count */}
+            <div className="panel-footer">
+                Total: {annotations.length} shapes
+            </div>
 
-                    {/* Resize Handle */}
-                    <div
-                        className="resize-handle"
-                        onMouseDown={handleResizeStart}
-                    />
-                </>
+            {/* Resize Handle */}
+            {!docked && (
+                <div
+                    className="resize-handle"
+                    onMouseDown={handleResizeStart}
+                />
             )}
         </div>
     );

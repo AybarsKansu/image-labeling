@@ -37,14 +37,17 @@
 }
 
 .panel-btn {
-    width: 24px;
-    height: 24px;
+    width: 32px;
+    height: 32px;
     border: none;
     border-radius: 4px;
     background: transparent;
     color: #9ca3af;
     cursor: pointer;
     transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .panel-btn:hover {
@@ -297,4 +300,34 @@
 .delete-btn:hover {
     background: linear-gradient(135deg, #b91c1c 0%, #dc2626 100%);
     transform: translateY(-1px);
+}
+
+/* --- Docked Mode Overrides --- */
+.floating-panel.docked,
+.properties-panel.docked {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    width: 100% !important;
+    height: 100% !important;
+    box-shadow: none !important;
+    border: none;
+    border-right: 1px solid #374151;
+    border-radius: 0;
+    z-index: 10;
+}
+
+.properties-panel.docked {
+    border-right: none;
+    border-left: 1px solid #374151;
+}
+
+.floating-panel.docked .resize-handle {
+    display: none;
+}
+
+.floating-panel.docked .panel-header {
+    cursor: default;
 }

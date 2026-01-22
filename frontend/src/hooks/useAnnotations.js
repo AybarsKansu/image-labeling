@@ -211,11 +211,10 @@ export const useAnnotations = () => {
     return {
         // State
         annotations,
-        selectedIds,       // REPLACED selectedIndex
-        selectedIndex: null, // Deprecated/Removed
+        selectedIds,
         selectedLabel,
-        selectedAnn,       // Computed (single or null)
-        selectedAnns,      // New: All selected objects
+        selectedAnn,
+        selectedAnns,
         history,
         future,
 

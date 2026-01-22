@@ -75,3 +75,64 @@
   height: 48px;
   border-width: 4px;
 }
+
+/* --- Main Layout Grid --- */
+.app-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  height: calc(100vh - 56px);
+  /* Toolbar height */
+}
+
+.left-panel-container {
+  background: #1f2937;
+  border-right: 1px solid #374151;
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.right-panel-container {
+  background: #1f2937;
+  border-left: 1px solid #374151;
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-resizer {
+  width: 4px;
+  background: transparent;
+  cursor: col-resize;
+  flex-shrink: 0;
+  transition: background 0.2s;
+  z-index: 100;
+  position: relative;
+}
+
+.panel-resizer:hover,
+.panel-resizer.active {
+  background: #3b82f6;
+  width: 4px;
+}
+
+.panel-resizer.left {
+  margin-right: -2px;
+}
+
+.panel-resizer.right {
+  margin-left: -2px;
+}
+
+.canvas-area {
+  flex-grow: 1;
+  position: relative;
+  background: #0f0f1a;
+  overflow: hidden;
+}

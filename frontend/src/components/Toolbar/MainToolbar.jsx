@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import './MainToolbar.css';
 
 /**
@@ -41,6 +41,8 @@ const MainToolbar = ({
     saveMessage
 }) => {
     const fileInputRef = useRef(null);
+    const [isToolsExpanded, setIsToolsExpanded] = useState(false);
+    const dropdownRef = useRef(null);
 
     const tools = [
         { id: 'select', icon: '👆', label: 'Select' },
@@ -52,6 +54,29 @@ const MainToolbar = ({
         { id: 'knife', icon: '🔪', label: 'Knife' },
         { id: 'eraser', icon: '🧹', label: 'Eraser' }
     ];
+
+    const activeToolObj = tools.find(t => t.id === tool) || tools[0];
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+                setIsToolsExpanded(false);
+            }
+        };
+
+        if (isToolsExpanded) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [isToolsExpanded]);
+
+    const handleToolSelect = (toolId) => {
+        setTool(toolId);
+        setIsToolsExpanded(false);
+    };
 
     return (
         <div className="main-toolbar">
@@ -82,19 +107,30 @@ const MainToolbar = ({
 
             <div className="toolbar-divider" />
 
-            {/* Tool Buttons */}
-            <div className="toolbar-section tools">
-                {tools.map(t => (
-                    <div key={t.id} className="tooltip-container">
-                        <button
-                            className={`toolbar-btn tool ${tool === t.id ? 'active' : ''}`}
-                            onClick={() => setTool(t.id)}
-                        >
-                            {t.icon}
-                        </button>
-                        <span className="tooltip-text">{t.label}</span>
+            {/* Accordion Tool Selector */}
+            <div className="toolbar-section tools" ref={dropdownRef}>
+                <div className="tool-dropdown-wrapper">
+                    <button
+                        className={`active-tool-display ${isToolsExpanded ? 'expanded' : ''}`}
+                        onClick={() => setIsToolsExpanded(!isToolsExpanded)}
+                    >
+                        <span className="tool-icon">{activeToolObj.icon}</span>
+                        <span className="dropdown-arrow">▾</span>
+                    </button>
+
+                    <div className={`tool-dropdown-menu ${isToolsExpanded ? 'visible' : ''}`}>
+                        {tools.map(t => (
+                            <button
+                                key={t.id}
+                                className={`dropdown-item ${tool === t.id ? 'selected' : ''}`}
+                                onClick={() => handleToolSelect(t.id)}
+                            >
+                                <span className="item-icon">{t.icon}</span>
+                                <span className="item-label">{t.label}</span>
+                            </button>
+                        ))}
                     </div>
-                ))}
+                </div>
             </div>
 
 
@@ -152,7 +188,7 @@ const MainToolbar = ({
                     >
                         ⚡ {selectedModel?.split('.')[0] || 'Models'}
                     </button>
-                    <span className="tooltip-text">Model Manager</span>
+
                 </div>
             </div>
 

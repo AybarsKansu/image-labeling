@@ -140,33 +140,119 @@
     cursor: pointer;
 }
 
-/* Tooltip */
-.tooltip-container {
+
+/* --- Accordion Dropdown Styles --- */
+
+.tool-dropdown-wrapper {
     position: relative;
-    display: inline-flex;
+    z-index: 2000;
 }
 
-.tooltip-container:hover .tooltip-text {
-    visibility: visible;
-    opacity: 1;
-}
-
-.tooltip-text {
-    visibility: hidden;
-    opacity: 0;
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    background-color: rgba(0, 0, 0, 0.9);
+/* Active Tool Display (Header) */
+.active-tool-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: linear-gradient(180deg, #374151 0%, #1f2937 100%);
+    border: 1px solid #4b5563;
+    border-radius: 8px;
     color: #fff;
-    padding: 5px 8px;
-    border-radius: 4px;
-    white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    min-width: 64px;
+    justify-content: space-between;
+}
+
+.active-tool-display:hover {
+    background: #4b5563;
+}
+
+/* Glow Effect for Active/Expanded State */
+.active-tool-display.expanded {
+    border-color: #3b82f6;
+    box-shadow: 0 0 12px rgba(59, 130, 246, 0.6);
+    /* Luminous Blue Glow */
+    background: #1f2937;
+}
+
+.tool-icon {
+    font-size: 20px;
+}
+
+.dropdown-arrow {
     font-size: 10px;
-    z-index: 1000;
-    margin-top: 4px;
-    transition: opacity 0.2s;
+    color: #9ca3af;
+    transition: transform 0.3s ease;
+}
+
+.active-tool-display.expanded .dropdown-arrow {
+    transform: rotate(180deg);
+    color: #3b82f6;
+}
+
+/* Dropdown Menu */
+.tool-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    width: 140px;
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    display: flex;
+    flex-direction: column;
+    padding: 6px;
+    gap: 2px;
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+    visibility: hidden;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-origin: top left;
+}
+
+.tool-dropdown-menu.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    visibility: visible;
+}
+
+/* Dropdown Items */
+.dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #e5e7eb;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    font-size: 13px;
+    width: 100%;
+    text-align: left;
+}
+
+.dropdown-item:hover {
+    background: #374151;
+}
+
+.dropdown-item.selected {
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    color: #fff;
+}
+
+.item-icon {
+    font-size: 16px;
+    min-width: 20px;
+    display: flex;
+    justify-content: center;
+}
+
+.item-label {
+    flex: 1;
 }
 
 /* Save Message */

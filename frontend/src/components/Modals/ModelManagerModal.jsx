@@ -76,9 +76,7 @@ export default function ModelManagerModal({ isOpen, onClose, activeModel, onSele
             <div className="modal-container">
                 {/* Header */}
                 <div className="modal-header">
-                    <div className="modal-title">
-                        <span>⚡</span> Model Manager
-                    </div>
+
                     <button onClick={onClose} className="close-btn">✖</button>
                 </div>
 

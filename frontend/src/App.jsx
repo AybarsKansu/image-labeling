@@ -368,9 +368,65 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [drawTools, annotationsHook]);
 
+  // Canvas container ref for dynamic resizing
+  const canvasContainerRef = React.useRef(null);
+
+  // Resize Observer for Canvas Area
+  useEffect(() => {
+    if (!canvasContainerRef.current) return;
+
+    const observer = new ResizeObserver(entries => {
+      for (let entry of entries) {
+        const { width, height } = entry.contentRect;
+        stage.setStageSize({ width, height });
+      }
+    });
+
+    observer.observe(canvasContainerRef.current);
+    return () => observer.disconnect();
+  }, [stage.setStageSize]);
+
+
   // ============================================
   // RENDER
   // ============================================
+
+  // Panel Resizing State
+  const [leftPanelWidth, setLeftPanelWidth] = useState(250);
+  const [rightPanelWidth, setRightPanelWidth] = useState(250);
+  const [isResizingLeft, setIsResizingLeft] = useState(false);
+  const [isResizingRight, setIsResizingRight] = useState(false);
+
+  // Resize Handlers
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (isResizingLeft) {
+        const newWidth = Math.min(Math.max(150, e.clientX), 450);
+        setLeftPanelWidth(newWidth);
+      }
+      if (isResizingRight) {
+        const newWidth = Math.min(Math.max(150, window.innerWidth - e.clientX), 450);
+        setRightPanelWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingLeft(false);
+      setIsResizingRight(false);
+      document.body.style.cursor = 'default';
+    };
+
+    if (isResizingLeft || isResizingRight) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingLeft, isResizingRight]);
 
   return (
     <div className="App">
@@ -403,66 +459,88 @@ function App() {
         saveMessage={saveMessage}
       />
 
-      {/* Canvas Stage */}
-      <CanvasStage
-        stageRef={stage.stageRef}
-        groupRef={stage.groupRef}
-        stageSize={stage.stageSize}
-        imageObj={stage.imageObj}
-        imageLayout={stage.imageLayout}
-        annotations={annotationsHook.annotations}
-        selectedIds={annotationsHook.selectedIds}
-        filterText={drawTools.filterText}
-        tool={drawTools.tool}
-        tempAnnotation={drawTools.tempAnnotation}
-        currentPolyPoints={drawTools.currentPolyPoints}
-        currentPenPoints={drawTools.currentPenPoints}
-        mousePos={drawTools.mousePos}
-        eraserSize={drawTools.eraserSize}
-        color={drawTools.color}
-        onWheel={stage.handleWheel}
-        onClick={drawTools.handleStageClick}
-        onMouseDown={handleMouseDown}
-        onMouseMove={drawTools.handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onDblClick={handleDoubleClick}
-        onVertexDrag={drawTools.handleVertexDrag}
-      />
+      <div className="app-content">
+        {/* Left Panel: Detected Labels */}
+        <div className="left-panel-container" style={{ width: leftPanelWidth }}>
+          {stage.imageObj && (
+            <FloatingPanel
+              docked={true}
+              annotations={annotationsHook.annotations}
+              filterText={drawTools.filterText}
+              setFilterText={drawTools.setFilterText}
+              onSelectLabel={(label) => drawTools.setFilterText(label)}
+            />
+          )}
+        </div>
 
-      {/* Floating Panel (Label Statistics) */}
-      {stage.imageObj && (
-        <FloatingPanel
-          annotations={annotationsHook.annotations}
-          filterText={drawTools.filterText}
-          setFilterText={drawTools.setFilterText}
-          onSelectLabel={(label) => drawTools.setFilterText(label)}
+        {/* Left Resizer */}
+        <div
+          className={`panel-resizer left ${isResizingLeft ? 'active' : ''}`}
+          onMouseDown={() => setIsResizingLeft(true)}
         />
-      )}
 
-      {/* Floating Selection Menu */}
-      {menuPosition && (
-        <FloatingSelectionMenu
-          position={menuPosition}
-          selectedCount={annotationsHook.selectedIds.length}
-          onMerge={handleMerge}
+        {/* Center: Canvas Area */}
+        <div className="canvas-area" ref={canvasContainerRef}>
+          <CanvasStage
+            stageRef={stage.stageRef}
+            groupRef={stage.groupRef}
+            stageSize={stage.stageSize}
+            imageObj={stage.imageObj}
+            imageLayout={stage.imageLayout}
+            annotations={annotationsHook.annotations}
+            selectedIds={annotationsHook.selectedIds}
+            filterText={drawTools.filterText}
+            tool={drawTools.tool}
+            tempAnnotation={drawTools.tempAnnotation}
+            currentPolyPoints={drawTools.currentPolyPoints}
+            currentPenPoints={drawTools.currentPenPoints}
+            mousePos={drawTools.mousePos}
+            eraserSize={drawTools.eraserSize}
+            color={drawTools.color}
+            onWheel={stage.handleWheel}
+            onClick={drawTools.handleStageClick}
+            onMouseDown={handleMouseDown}
+            onMouseMove={drawTools.handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onDblClick={handleDoubleClick}
+            onVertexDrag={drawTools.handleVertexDrag}
+          />
+
+          {/* Floating Selection Menu (positioned absolutely within canvas area) */}
+          {menuPosition && (
+            <FloatingSelectionMenu
+              position={menuPosition}
+              selectedCount={annotationsHook.selectedIds.length}
+              onMerge={handleMerge}
+            />
+          )}
+        </div>
+
+        {/* Right Resizer */}
+        <div
+          className={`panel-resizer right ${isResizingRight ? 'active' : ''}`}
+          onMouseDown={() => setIsResizingRight(true)}
         />
-      )}
 
-      {/* Properties Panel */}
-      <PropertiesPanel
-        selectedAnn={annotationsHook.selectedAnn}
-        selectedLabel={annotationsHook.selectedLabel}
-        onLabelChange={handleLabelChange}
-        onDelete={annotationsHook.deleteSelected}
-        onSimplify={polygonMods.handleSimplify}
-        onDensify={polygonMods.handleDensify}
-        onReset={polygonMods.handleReset}
-        onBeautify={handleBeautify}
-        canModify={polygonMods.canModify}
-        canReset={polygonMods.canReset}
-        isProcessing={drawTools.isProcessing}
-        suggestions={annotationsHook.selectedAnn?.suggestions}
-      />
+        {/* Right Panel: Properties */}
+        <div className="right-panel-container" style={{ width: rightPanelWidth }}>
+          <PropertiesPanel
+            docked={true}
+            selectedAnn={annotationsHook.selectedAnn}
+            selectedLabel={annotationsHook.selectedLabel}
+            onLabelChange={handleLabelChange}
+            onDelete={annotationsHook.deleteSelected}
+            onSimplify={polygonMods.handleSimplify}
+            onDensify={polygonMods.handleDensify}
+            onReset={polygonMods.handleReset}
+            onBeautify={handleBeautify}
+            canModify={polygonMods.canModify}
+            canReset={polygonMods.canReset}
+            isProcessing={drawTools.isProcessing}
+            suggestions={annotationsHook.selectedAnn?.suggestions}
+          />
+        </div>
+      </div>
 
       {/* Modals */}
       <SettingsModal

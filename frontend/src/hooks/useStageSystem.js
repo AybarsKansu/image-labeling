@@ -19,12 +19,15 @@ export const useStageSystem = () => {
     const stageRef = useRef(null);
     const groupRef = useRef(null);
 
-    // --- Window Resize Handler ---
+    // --- Window/Container Resize Handler ---
+    // We now export setStageSize so the parent can update it based on the container
     useEffect(() => {
         const handleResize = () => {
+            // Fallback if no container logic is implemented upstream yet
+            // usage of setStageSize from App.jsx's ResizeObserver will override this
             setStageSize({
                 width: window.innerWidth,
-                height: window.innerHeight - 100
+                height: window.innerHeight - 56 // Minus Toolbar height approx
             });
         };
         window.addEventListener('resize', handleResize);
@@ -143,6 +146,7 @@ export const useStageSystem = () => {
         groupRef,
 
         // Actions
+        setStageSize,
         setImageLayout,
         handleWheel,
         handleImageUpload,

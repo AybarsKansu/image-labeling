@@ -17,11 +17,12 @@ const PropertiesPanel = ({
     canModify,
     canReset,
     isProcessing,
-    suggestions
+    suggestions,
+    docked = false
 }) => {
     if (!selectedAnn) {
         return (
-            <div className="properties-panel collapsed">
+            <div className={`properties-panel ${docked ? 'docked' : 'collapsed'}`}>
                 <div className="properties-hint">
                     Select a shape to edit properties
                 </div>
@@ -32,7 +33,7 @@ const PropertiesPanel = ({
     const pointCount = selectedAnn.points ? selectedAnn.points.length / 2 : 0;
 
     return (
-        <div className="properties-panel">
+        <div className={`properties-panel ${docked ? 'docked' : ''}`}>
             <div className="properties-header">
                 <span className="properties-title">🎯 Properties</span>
             </div>

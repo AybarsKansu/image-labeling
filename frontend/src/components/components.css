@@ -2,17 +2,31 @@
 
 /* Global Animations */
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes slideUp {
-  from { transform: translateY(20px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Modal Overlay */
@@ -21,7 +35,7 @@
   inset: 0;
   background: rgba(0, 0, 0, 0.7);
   backdrop-filter: blur(8px);
-  z-index: 1000;
+  z-index: 3000;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -242,7 +256,8 @@
   margin-bottom: 0.5rem;
 }
 
-.form-select, .form-input {
+.form-select,
+.form-input {
   width: 100%;
   background: #1f2937;
   border: 1px solid #374151;
@@ -254,8 +269,10 @@
   transition: border-color 0.2s;
 }
 
-.form-select:focus, .form-input:focus {
-  border-color: #f97316; /* Orange focus for training */
+.form-select:focus,
+.form-input:focus {
+  border-color: #f97316;
+  /* Orange focus for training */
 }
 
 .btn-train {
@@ -292,9 +309,17 @@
 }
 
 @keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0); }
-  50% { box-shadow: 0 0 0 5px rgba(249, 115, 22, 0.1); }
-  100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0); }
+  0% {
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px rgba(249, 115, 22, 0.1);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
+  }
 }
 
 .progress-header {
