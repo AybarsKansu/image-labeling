@@ -89,6 +89,12 @@ class AnnotationConverter {
      * @returns {Object} {annotations: Array, categories: Array}
      */
     static cocoToInternal(cocoData) {
+        if (!cocoData || typeof cocoData !== 'object') {
+            throw new Error('Invalid data: COCO input must be a JSON object.');
+        }
+        if (!cocoData.annotations && !cocoData.categories && !cocoData.images) {
+            throw new Error('Invalid COCO format: Missing standard COCO keys (images, annotations, categories).');
+        }
         const categoryIdToName = new Map();
         (cocoData.categories || []).forEach(cat => {
             categoryIdToName.set(cat.id, cat.name);
@@ -150,6 +156,14 @@ class AnnotationConverter {
      * @returns {Object} COCO-compliant object
      */
     static toonToCoco(toonData) {
+        if (!toonData || typeof toonData !== 'object') {
+            throw new Error('Invalid data: Input is not a JSON object.');
+        }
+        // Basic TOON validation: must have 'd' (data) or 'v' (version)
+        if (!Array.isArray(toonData.d)) {
+            throw new Error('Invalid TOON format: Missing "d" (data) array.');
+        }
+
         const [fileName, width, height] = toonData.m || ['image.jpg', 0, 0];
         const categoryNames = toonData.c || [];
         const data = toonData.d || [];
@@ -161,6 +175,11 @@ class AnnotationConverter {
 
         const annotations = data.map((item, idx) => {
             const [catIdx, points] = item;
+
+            if (!Array.isArray(points)) {
+                console.warn(`Skipping invalid annotation at index ${idx}: Points is not an array`);
+                return null;
+            }
 
             // Calculate bbox
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -180,7 +199,7 @@ class AnnotationConverter {
                 area: (maxX - minX) * (maxY - minY),
                 iscrowd: 0
             };
-        });
+        }).filter(a => a !== null);
 
         return {
             images: [{
@@ -207,7 +226,20 @@ class AnnotationConverter {
      * @returns {Object} COCO-compliant object
      */
     static yoloToCoco(yoloText, imageWidth, imageHeight, classNames = []) {
+        if (typeof yoloText !== 'string') {
+            throw new Error('Invalid input: YOLO content must be a string.');
+        }
+
         const lines = yoloText.trim().split('\n').filter(l => l.trim());
+
+        // Basic YOLO Check: Look at first non-empty line
+        if (lines.length > 0) {
+            const parts = lines[0].trim().split(/\s+/);
+            // Check if first part is a number (class_id) and we have at least 5 parts (id + 4 coords)
+            if (parts.length < 5 || isNaN(parseFloat(parts[0]))) {
+                throw new Error('Invalid YOLO format: Lines must start with class_id followed by coordinates.');
+            }
+        }
 
         const categoryMap = new Map();
         classNames.forEach((name, idx) => {
@@ -217,7 +249,11 @@ class AnnotationConverter {
         const annotations = lines.map((line, idx) => {
             const parts = line.trim().split(/\s+/);
             const classId = parseInt(parts[0]);
+
+            if (isNaN(classId)) return null;
+
             const normalizedCoords = parts.slice(1).map(parseFloat);
+            if (normalizedCoords.some(isNaN)) return null;
 
             // Denormalize coordinates
             const points = [];
@@ -249,7 +285,7 @@ class AnnotationConverter {
                 area: (maxX - minX) * (maxY - minY),
                 iscrowd: 0
             };
-        });
+        }).filter(a => a !== null);
 
         return {
             images: [{
@@ -380,6 +416,17 @@ ${objectElements.join('\n')}
     static vocToCoco(xmlString, imageWidth = null, imageHeight = null) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(xmlString, 'text/xml');
+
+        // Check for parse errors
+        const parseError = doc.querySelector('parsererror');
+        if (parseError) {
+            throw new Error('Invalid XML format: ' + parseError.textContent);
+        }
+
+        const annotationNode = doc.querySelector('annotation');
+        if (!annotationNode) {
+            throw new Error('Invalid Pascal VOC format: Missing <annotation> root element.');
+        }
 
         const filename = doc.querySelector('filename')?.textContent || 'image.jpg';
         const width = imageWidth || parseInt(doc.querySelector('size > width')?.textContent) || 0;

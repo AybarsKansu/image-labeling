@@ -370,3 +370,40 @@
     justify-content: flex-start;
     font-size: 12px;
 }
+
+/* Import Dropdown - Mirroring Export Styles */
+.import-dropdown-wrapper {
+    position: relative;
+    z-index: 2000;
+}
+
+.import-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    width: 160px;
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    display: flex;
+    flex-direction: column;
+    padding: 6px;
+    gap: 2px;
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+    visibility: hidden;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transform-origin: top left;
+}
+
+.import-dropdown-menu.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    visibility: visible;
+}
+
+.import-dropdown-menu .dropdown-item {
+    justify-content: flex-start;
+    font-size: 12px;
+}

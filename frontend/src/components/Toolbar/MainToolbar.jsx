@@ -55,9 +55,11 @@ const MainToolbar = ({
     const annotationInputRef = useRef(null);
     const [isToolsExpanded, setIsToolsExpanded] = useState(false);
     const [isExportExpanded, setIsExportExpanded] = useState(false);
+    const [isImportExpanded, setIsImportExpanded] = useState(false);
     const [loadFormat, setLoadFormat] = useState('toon');
     const dropdownRef = useRef(null);
     const exportDropdownRef = useRef(null);
+    const importDropdownRef = useRef(null);
 
     const tools = [
         { id: 'select', icon: '👆', label: 'Select' },
@@ -78,10 +80,10 @@ const MainToolbar = ({
     ];
 
     const loadFormats = [
-        { id: 'toon', label: 'TOON', accept: '.toon,.json' },
-        { id: 'yolo', label: 'YOLO', accept: '.txt' },
-        { id: 'coco', label: 'COCO', accept: '.json' },
-        { id: 'voc', label: 'Pascal VOC', accept: '.xml' }
+        { id: 'toon', label: 'TOON (.toon)', ext: '.toon, .json' },
+        { id: 'yolo', label: 'YOLO (.txt)', ext: '.txt' },
+        { id: 'coco', label: 'COCO (.json)', ext: '.json' },
+        { id: 'voc', label: 'Pascal VOC (.xml)', ext: '.xml' }
     ];
 
     const activeToolObj = tools.find(t => t.id === tool) || tools[0];
@@ -95,19 +97,33 @@ const MainToolbar = ({
             if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target)) {
                 setIsExportExpanded(false);
             }
+            if (importDropdownRef.current && !importDropdownRef.current.contains(event.target)) {
+                setIsImportExpanded(false);
+            }
         };
 
-        if (isToolsExpanded || isExportExpanded) {
+        if (isToolsExpanded || isExportExpanded || isImportExpanded) {
             document.addEventListener('mousedown', handleClickOutside);
         }
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
         };
-    }, [isToolsExpanded, isExportExpanded]);
+    }, [isToolsExpanded, isExportExpanded, isImportExpanded]);
 
     const handleToolSelect = (toolId) => {
         setTool(toolId);
         setIsToolsExpanded(false);
+    };
+
+    const handleImportClick = (format) => {
+        setLoadFormat(format);
+        setIsImportExpanded(false);
+        // Defer click to allow state update to propagate if needed (though mostly synch in event loop ordering)
+        setTimeout(() => {
+            if (annotationInputRef.current) {
+                annotationInputRef.current.click();
+            }
+        }, 0);
     };
 
     const handleAnnotationFileChange = (e) => {
@@ -144,33 +160,59 @@ const MainToolbar = ({
                     📁 Open Image
                 </button>
 
-                {/* Load Annotations */}
+                {/* Load Annotations Dropdown */}
                 <input
                     ref={annotationInputRef}
                     type="file"
-                    accept={loadFormats.find(f => f.id === loadFormat)?.accept || '.toon,.json,.txt,.xml'}
-                    onChange={handleAnnotationFileChange}
+                    accept={loadFormats.find(f => f.id === loadFormat)?.ext || '.toon,.json,.txt,.xml'}
+                    onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+
+                        // Validate Extension
+                        const currentFormat = loadFormats.find(f => f.id === loadFormat);
+                        const expectedExts = currentFormat?.ext.split(',').map(e => e.trim().toLowerCase()) || [];
+                        const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+
+                        // Allow .json for TOON as well since we added it to the list, but let's be strict based on the config
+                        const isValid = expectedExts.some(ext => ext === fileExt);
+
+                        if (!isValid) {
+                            alert(`Invalid file type! \nSelected format: ${currentFormat?.label}\nExpected extensions: ${currentFormat?.ext}\nYour file: ${file.name}`);
+                            e.target.value = ''; // Reset input
+                            return;
+                        }
+
+                        if (onLoadAnnotations) {
+                            onLoadAnnotations(file, loadFormat);
+                        }
+                        // Reset input
+                        e.target.value = '';
+                    }}
                     style={{ display: 'none' }}
                 />
-                <div className="load-annotations-group">
-                    <select
-                        className="format-select"
-                        value={loadFormat}
-                        onChange={(e) => setLoadFormat(e.target.value)}
-                        title="Select annotation format to load"
-                    >
-                        {loadFormats.map(f => (
-                            <option key={f.id} value={f.id}>{f.label}</option>
-                        ))}
-                    </select>
+
+                <div className="import-dropdown-wrapper" ref={importDropdownRef}>
                     <button
-                        className="toolbar-btn secondary"
-                        onClick={() => annotationInputRef.current?.click()}
+                        className={`toolbar-btn secondary ${isImportExpanded ? 'active' : ''}`}
+                        onClick={() => setIsImportExpanded(!isImportExpanded)}
                         disabled={!imageFile}
-                        title="Load annotations from file"
+                        title="Import annotations from file"
                     >
-                        📥 Import Annotations
+                        📥 Import ▾
                     </button>
+
+                    <div className={`import-dropdown-menu ${isImportExpanded ? 'visible' : ''}`}>
+                        {loadFormats.map(f => (
+                            <button
+                                key={f.id}
+                                className="dropdown-item"
+                                onClick={() => handleImportClick(f.id)}
+                            >
+                                {f.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
                 {imageFile && (
