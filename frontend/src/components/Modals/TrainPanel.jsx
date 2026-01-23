@@ -22,7 +22,9 @@ export default function TrainPanel({
     trainingProgress,
     trainingMessage,
     // Actions
+    // Actions
     onStartTraining,
+    onCancelTraining,
     // Error
     error
 }) {
@@ -110,17 +112,29 @@ export default function TrainPanel({
 
                     {error && <div className="error-msg">{error}</div>}
 
-                    <button
-                        onClick={() => onStartTraining({
-                            base_model: selectedBaseModel,
-                            epochs,
-                            batch_size: batchSize
-                        })}
-                        disabled={isTraining}
-                        className="btn-train"
-                    >
-                        {isTraining ? 'Training...' : 'Start Training'}
-                    </button>
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                        {isTraining && (
+                            <button
+                                onClick={onCancelTraining}
+                                className="btn-train cancel"
+                                style={{ background: '#ef4444' }}
+                            >
+                                🛑 Cancel
+                            </button>
+                        )}
+                        <button
+                            onClick={() => onStartTraining({
+                                base_model: selectedBaseModel,
+                                epochs,
+                                batch_size: batchSize
+                            })}
+                            disabled={isTraining}
+                            className="btn-train"
+                            style={{ flex: 1 }}
+                        >
+                            {isTraining ? 'Training in Progress...' : 'Start Training'}
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

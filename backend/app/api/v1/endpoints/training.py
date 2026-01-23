@@ -79,6 +79,22 @@ async def train_model(
     return JSONResponse({"success": True, "message": "Preprocessing & Training started"})
 
 
+@router.post("/cancel-training")
+async def cancel_training():
+    """Cancels the running training task."""
+    global _training_status
+    if not _training_status.is_training:
+        return JSONResponse({"success": False, "message": "No training in progress."})
+    
+    _training_status.stop_requested = True
+    _training_status.message = "Stopping training..."
+    return JSONResponse({"success": True, "message": "Cancellation requested."})
+
+
+import json
+import glob
+from pathlib import Path
+
 def _train_model_task(
     base_model_name: str,
     epochs: int,
@@ -87,11 +103,12 @@ def _train_model_task(
     model_manager: ModelManager,
     dataset_service: DatasetService
 ):
-    """Background task for model training."""
+    """Background task for model training with TOON support."""
     global _training_status
     settings = get_settings()
     
     _training_status.is_training = True
+    _training_status.stop_requested = False
     _training_status.progress = 0.0
     _training_status.epoch = 0
     _training_status.total_epochs = epochs
@@ -102,8 +119,9 @@ def _train_model_task(
         target_data_dir = settings.DATASET_DIR
         
         if preprocess_params:
+            if _training_status.stop_requested: raise InterruptedError("Training cancelled")
+
             _training_status.message = "Preprocessing..."
-            
             success = dataset_service.preprocess_dataset(
                 resize_mode=preprocess_params.get('resize_mode', 'none'),
                 enable_tiling=preprocess_params.get('enable_tiling', False),
@@ -118,31 +136,81 @@ def _train_model_task(
                 _training_status.is_training = False
                 return
         
-        # Generate data.yaml
+        if _training_status.stop_requested: raise InterruptedError("Training cancelled")
+
+        # ---------------------------------------------------------
+        # 1. SINIF İSİMLERİNİ (CLASSES) BULMA MANTIĞI (GÜNCELLENDİ)
+        # ---------------------------------------------------------
+        classes = []
+        # Find newest .toon or .json file
+        project_files = list(target_data_dir.glob("*.toon")) + list(target_data_dir.glob("*.json"))
+        
+        # Sort by modification time (newest first)
+        project_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+
+        _training_status.message = "Extracting classes..."
+        found_classes = False
+        
+        for p_file in project_files:
+            try:
+                if _training_status.stop_requested: raise InterruptedError("Training cancelled")
+                print(f"Checking project file: {p_file.name}")
+                with open(p_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    
+                    # A) TOON Format "c": ["cat", "dog"]
+                    if "c" in data and isinstance(data["c"], list):
+                        classes = data["c"]
+                        found_classes = True
+                        print(f"Classes found in TOON file: {p_file.name}")
+                        break
+                    
+                    # B) COCO Format
+                    elif "categories" in data:
+                        sorted_cats = sorted(data["categories"], key=lambda x: x.get("id", 0))
+                        classes = [c["name"] for c in sorted_cats]
+                        found_classes = True
+                        print(f"Classes found in COCO file: {p_file.name}")
+                        break
+                        
+            except InterruptedError:
+                raise
+            except Exception as e:
+                print(f"Failed to parse {p_file}: {e}")
+                continue
+        
+        if not found_classes:
+            # Fallback to classes.txt if exists
+            classes_file = target_data_dir / "classes.txt"
+            if classes_file.exists():
+                with open(classes_file, "r", encoding="utf-8") as f:
+                    classes = [line.strip() for line in f.readlines() if line.strip()]
+                found_classes = True
+            
+        if not found_classes:
+            raise Exception("No classes found. Please save a project (.toon/.json) or provide classes.txt")
+
+        # ---------------------------------------------------------
+        # 2. DATA.YAML OLUŞTURMA
+        # ---------------------------------------------------------
         yaml_content = f"""
 path: {target_data_dir.as_posix()}
 train: images
 val: images
 names:
 """
-        # Read classes
-        classes_file = target_data_dir / "classes.txt"
-        if not classes_file.exists():
-            classes_file = settings.DATASET_DIR / "classes.txt"
-        
-        if not classes_file.exists():
-            raise Exception("No classes.txt found. Cannot train.")
-        
-        with open(classes_file, "r") as f:
-            classes = [line.strip() for line in f.readlines() if line.strip()]
-        
         for i, c in enumerate(classes):
             yaml_content += f"  {i}: {c}\n"
         
         yaml_path = settings.DATASET_DIR / "data.yaml"
-        with open(yaml_path, "w") as f:
+        with open(yaml_path, "w", encoding="utf-8") as f:
             f.write(yaml_content)
+            
+        print(f"Generated data.yaml with {len(classes)} classes.")
         
+        # ---------------------------------------------------------
+        # 3. MODEL EĞİTİMİ (DEĞİŞMEDİ)
+        # ---------------------------------------------------------
         _training_status.message = "Starting training..."
         
         # Load model
@@ -150,6 +218,10 @@ names:
         
         # Custom callback for progress
         def on_train_epoch_end(trainer):
+            if _training_status.stop_requested:
+                print("Stop requested in callback.")
+                raise InterruptedError("Training cancelled by user")
+                
             _training_status.epoch = trainer.epoch + 1
             progress = 0.3 + ((trainer.epoch + 1) / epochs * 0.7)
             _training_status.progress = min(progress, 0.99)
@@ -187,14 +259,28 @@ names:
             try:
                 if os.path.exists("runs"):
                     shutil.rmtree("runs")
-                    print("Deleted runs/ folder.")
             except Exception as e:
-                print(f"Failed to delete runs/: {e}")
+                print(f"Failed to cleanup runs: {e}")
         else:
             _training_status.message = "Failed: best.pt not found."
     
+    except InterruptedError:
+        _training_status.message = "Training Cancelled."
+        print("Training cancelled by user request.")
+    except RuntimeError as e:
+        error_str = str(e).lower()
+        if "out of memory" in error_str:
+             _training_status.message = "Error: GPU Out of Memory (OOM). Reduce Batch Size."
+        elif "failed reading zip archive" in error_str:
+             _training_status.message = "Error: Corrupt model file. Delete and re-download base model."
+        else:
+             _training_status.message = f"Error: {e}"
+        print(f"Runtime Error: {e}")
     except Exception as e:
         _training_status.message = f"Error: {e}"
         print(f"Training Error: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         _training_status.is_training = False
+        _training_status.stop_requested = False

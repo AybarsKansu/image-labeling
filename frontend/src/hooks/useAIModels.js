@@ -46,8 +46,46 @@ export const useAIModels = (initialModel = null, textPrompt) => {
         epoch: 0,
         totalEpochs: 0,
         map50: 0,
-        loss: 0
+        loss: 0,
+        message: 'Idle'
     });
+
+    // Poll training status
+    useEffect(() => {
+        let intervalId;
+
+        const checkStatus = async () => {
+            try {
+                const res = await axios.get(`${API_URL}/training-status`);
+                const data = res.data;
+
+                setTrainingStatus(prev => {
+                    // Only update if changed to avoid renders? Actually React handles that.
+                    // But we want to preserve derived client-side state if needed.
+                    // Data maps directly to our state shape mostly.
+                    return {
+                        isTraining: data.is_training,
+                        progress: data.progress,
+                        epoch: data.epoch,
+                        totalEpochs: data.total_epochs,
+                        message: data.message,
+                        loss: 0 // Backend doesn't send loss yet in status endpoint usually?
+                    };
+                });
+            } catch (err) {
+                console.error("Failed to poll status:", err);
+            }
+        };
+
+        // Initial check on mount
+        checkStatus();
+
+        // Start polling if we think we might be training, OR just poll always at low freq?
+        // Better to poll always to catch updates from other tabs/reloads.
+        intervalId = setInterval(checkStatus, 2000);
+
+        return () => clearInterval(intervalId);
+    }, []);
 
     // Update params when model changes
     useEffect(() => {
@@ -160,6 +198,15 @@ export const useAIModels = (initialModel = null, textPrompt) => {
                     success: false,
                     error: err.response?.data?.detail || err.message
                 };
+            }
+        },
+        cancelTraining: async () => {
+            try {
+                await axios.post(`${API_URL}/cancel-training`);
+                return { success: true };
+            } catch (err) {
+                console.error("Cancel failed:", err);
+                return { success: false, error: err.message };
             }
         }
     };

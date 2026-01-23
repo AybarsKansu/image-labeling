@@ -95,6 +95,10 @@ export const usePolygonModifiers = (annotationsHook, stageHook) => {
             return { success: false, error: 'No selection or image' };
         }
 
+        if (!selectedModel) {
+            return { success: false, error: 'Please select an AI model first' };
+        }
+
         if (setIsProcessing) setIsProcessing(true);
 
         // We'll process only valid polygons

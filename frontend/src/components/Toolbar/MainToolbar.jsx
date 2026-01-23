@@ -169,7 +169,7 @@ const MainToolbar = ({
                         disabled={!imageFile}
                         title="Load annotations from file"
                     >
-                        📥 Load
+                        📥 Import Annotations
                     </button>
                 </div>
 
@@ -280,7 +280,7 @@ const MainToolbar = ({
                             maxWidth: '160px'
                         }}
                     >
-                        <option value="" disabled>✨ Select AI Model...</option>
+                        <option value="" disabled hidden>✨ Select AI Model...</option>
                         {/* Models are now objects { id, name, ... } */}
                         {models && models.map(model => (
                             <option key={model.id} value={model.id}>

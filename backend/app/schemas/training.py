@@ -29,6 +29,7 @@ class TrainingStatus(BaseModel):
     message: str = "Idle"
     epoch: int = 0
     total_epochs: int = 0
+    stop_requested: bool = False
 
 
 class TrainingStatusResponse(BaseModel):

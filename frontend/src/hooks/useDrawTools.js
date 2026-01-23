@@ -384,6 +384,12 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
                 return;
             }
 
+            if (!selectedModel) {
+                alert('Please select an AI model to use the AI Box tool.');
+                setTempAnnotation(null);
+                return;
+            }
+
             setIsProcessing(true);
             try {
                 const formData = new FormData();
@@ -512,6 +518,11 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
     const handleDetectAll = useCallback(async () => {
         if (!imageFile) {
             alert('Please upload an image first');
+            return;
+        }
+
+        if (!selectedModel) {
+            alert('Please select an AI model first.');
             return;
         }
 

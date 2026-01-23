@@ -1,0 +1,8 @@
+
+path: /home/aybars_kansu_han/Desktop/example/image-labeling/backend/dataset
+train: images
+val: images
+names:
+  0: cat_test
+  1: dog_test
+  2: car_test

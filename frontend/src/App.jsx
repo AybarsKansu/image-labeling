@@ -37,7 +37,7 @@ function App() {
   const [textPrompt, setTextPrompt] = useState('');
 
   // AI Models (model selection, training)
-  const aiModels = useAIModels('yolov11x-seg.pt', textPrompt);
+  const aiModels = useAIModels(null, textPrompt);
 
   // Draw tools (pen, box, knife, eraser, etc.)
   const drawTools = useDrawTools(stage, annotationsHook, textPrompt, aiModels.selectedModel, aiModels.currentParams);
@@ -749,6 +749,7 @@ function App() {
         trainingProgress={aiModels.trainingProgress}
         trainingMessage={aiModels.trainingMessage}
         onStartTraining={handleStartTraining}
+        onCancelTraining={aiModels.actions.cancelTraining}
         error={trainError}
       />
     </div>
