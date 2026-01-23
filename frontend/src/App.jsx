@@ -15,7 +15,7 @@ import { CanvasStage } from './components/Canvas';
 import { MainToolbar } from './components/Toolbar';
 import { FloatingPanel, PropertiesPanel, FloatingSelectionMenu, ModelParametersPanel } from './components/Panels';
 import DragDropZone from './components/Common/DragDropZone';
-import { ModelManagerModal, PreprocessingModal, TrainPanel } from './components/Modals';
+import { ModelManagerModal, PreprocessingModal, TrainPanel, ClassImportModal } from './components/Modals';
 
 // Config
 import { API_URL } from './constants/config';
@@ -60,6 +60,11 @@ function App() {
   const [trainBaseModel, setTrainBaseModel] = useState('yolov8m-seg.pt');
   const [trainError, setTrainError] = useState('');
 
+  // Import Modal State
+  const [showClassImportModal, setShowClassImportModal] = useState(false);
+  const [pendingImportFile, setPendingImportFile] = useState(null);
+  const [pendingImportText, setPendingImportText] = useState('');
+
 
   // ============================================
   // HELPER: Selection Menu Position
@@ -87,15 +92,119 @@ function App() {
     if (!isFinite(minX)) return null;
 
     const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2; // Position at the top edge of bounding box? Or center? User said center.
+    const centerY = (minY + maxY) / 2;
 
     // Convert to screen coordinates
-    // screen = (image * scale) + offset
     const screenX = (centerX * stage.imageLayout.scale) + stage.imageLayout.x;
     const screenY = (centerY * stage.imageLayout.scale) + stage.imageLayout.y;
 
     return { x: screenX, y: screenY };
   }, [annotationsHook.selectedIds, annotationsHook.selectedAnns, stage.imageLayout, stage.imageObj]);
+
+
+
+
+  // Handle load annotations from file
+  const handleLoadAnnotations = useCallback(async (file, format) => {
+    if (!file || !stage.imageObj) {
+      setSaveMessage('❌ Please open an image first!');
+      setTimeout(() => setSaveMessage(null), 3000);
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const imageWidth = stage.imageObj.width;
+      const imageHeight = stage.imageObj.height;
+
+      let cocoData;
+
+      if (format === 'yolo') {
+        // Check for metadata
+        const hasMetadata = text.includes('# classes:');
+        if (!hasMetadata) {
+          setPendingImportText(text);
+          setShowClassImportModal(true);
+          return;
+        }
+        // Try to extract class names from a classes.txt if available
+        // For now, use generic names or metadata if present (handled inside converter)
+        cocoData = AnnotationConverter.yoloToCoco(text, imageWidth, imageHeight, []);
+      } else {
+        switch (format) {
+          case 'toon': {
+            const toonData = JSON.parse(text);
+            cocoData = AnnotationConverter.toonToCoco(toonData);
+            break;
+          }
+          case 'coco': {
+            cocoData = JSON.parse(text);
+            break;
+          }
+          case 'voc': {
+            cocoData = AnnotationConverter.vocToCoco(text, imageWidth, imageHeight);
+            break;
+          }
+          default:
+            throw new Error(`Unknown format: ${format}`);
+        }
+      }
+
+      // Shared logic for finishing import
+      finishImport(cocoData, format);
+
+    } catch (err) {
+      console.error('Load failed', err);
+      setSaveMessage(`❌ Failed to load: ${err.message}`);
+      setTimeout(() => setSaveMessage(null), 5000);
+    }
+  }, [stage.imageObj]);
+
+  const finishImport = useCallback((cocoData, format) => {
+    // Convert COCO to internal state
+    const { annotations: newAnns } = AnnotationConverter.cocoToInternal(cocoData);
+
+    // Add unique IDs
+    const annsWithIds = newAnns.map(ann => ({
+      ...ann,
+      id: generateId()
+    }));
+
+    // Add to history and set annotations
+    annotationsHook.addToHistory(annotationsHook.annotations);
+    annotationsHook.setAnnotations(annsWithIds);
+
+    setSaveMessage(`✅ Loaded ${annsWithIds.length} annotations from ${format.toUpperCase()}!`);
+    setTimeout(() => setSaveMessage(null), 5000);
+  }, [annotationsHook]);
+
+  const handleClassImportSubmit = useCallback(({ mode, classes }) => {
+    setShowClassImportModal(false);
+    try {
+      const imageWidth = stage.imageObj.width;
+      const imageHeight = stage.imageObj.height;
+
+      let classNames = [];
+      if (mode === 'upload') {
+        classNames = classes;
+      } else {
+        // Generic mode - pass empty, converter uses default 'class_N' logic if extraction fails
+        classNames = [];
+      }
+
+      const cocoData = AnnotationConverter.yoloToCoco(pendingImportText, imageWidth, imageHeight, classNames);
+      finishImport(cocoData, 'yolo');
+    } catch (err) {
+      console.error('Import failed', err);
+      setSaveMessage(`❌ Import failed: ${err.message}`);
+      setTimeout(() => setSaveMessage(null), 5000);
+    } finally {
+      setPendingImportText('');
+    }
+  }, [pendingImportText, stage.imageObj, finishImport]);
+
+
+
 
 
   // ============================================
@@ -270,65 +379,7 @@ function App() {
     setTimeout(() => setSaveMessage(null), 5000);
   }, [stage.imageFile, stage.imageObj, annotationsHook.annotations, enableAugmentation]);
 
-  // Handle load annotations from file
-  const handleLoadAnnotations = useCallback(async (file, format) => {
-    if (!file || !stage.imageObj) {
-      setSaveMessage('❌ Please open an image first!');
-      setTimeout(() => setSaveMessage(null), 3000);
-      return;
-    }
 
-    try {
-      const text = await file.text();
-      const imageWidth = stage.imageObj.width;
-      const imageHeight = stage.imageObj.height;
-
-      let cocoData;
-
-      switch (format) {
-        case 'toon': {
-          const toonData = JSON.parse(text);
-          cocoData = AnnotationConverter.toonToCoco(toonData);
-          break;
-        }
-        case 'yolo': {
-          // Try to extract class names from a classes.txt if available
-          // For now, use generic names
-          cocoData = AnnotationConverter.yoloToCoco(text, imageWidth, imageHeight, []);
-          break;
-        }
-        case 'coco': {
-          cocoData = JSON.parse(text);
-          break;
-        }
-        case 'voc': {
-          cocoData = AnnotationConverter.vocToCoco(text, imageWidth, imageHeight);
-          break;
-        }
-        default:
-          throw new Error(`Unknown format: ${format}`);
-      }
-
-      // Convert COCO to internal state
-      const { annotations: newAnns } = AnnotationConverter.cocoToInternal(cocoData);
-
-      // Add unique IDs
-      const annsWithIds = newAnns.map(ann => ({
-        ...ann,
-        id: generateId()
-      }));
-
-      // Add to history and set annotations
-      annotationsHook.addToHistory(annotationsHook.annotations);
-      annotationsHook.setAnnotations(annsWithIds);
-
-      setSaveMessage(`✅ Loaded ${annsWithIds.length} annotations from ${format.toUpperCase()}!`);
-    } catch (err) {
-      console.error('Load failed', err);
-      setSaveMessage(`❌ Failed to load: ${err.message}`);
-    }
-    setTimeout(() => setSaveMessage(null), 5000);
-  }, [stage.imageObj, annotationsHook]);
 
   // Handle export to various formats
   const handleExport = useCallback((format) => {
@@ -718,6 +769,15 @@ function App() {
       </div>
 
 
+
+      <ClassImportModal
+        isOpen={showClassImportModal}
+        onClose={() => {
+          setShowClassImportModal(false);
+          setPendingImportText('');
+        }}
+        onSubmit={handleClassImportSubmit}
+      />
 
       <ModelManagerModal
         isOpen={aiModels.modals.showModelManager}

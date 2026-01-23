@@ -32,6 +32,13 @@ const PropertiesPanel = ({
 
     const pointCount = selectedAnn.points ? selectedAnn.points.length / 2 : 0;
 
+    // Local state for label input to prevent issues with empty strings during typing
+    const [localLabel, setLocalLabel] = React.useState(selectedLabel || '');
+
+    React.useEffect(() => {
+        setLocalLabel(selectedLabel || '');
+    }, [selectedLabel]);
+
     return (
         <div className={`properties-panel ${docked ? 'docked' : ''}`}>
             <div className="properties-header">
@@ -44,8 +51,15 @@ const PropertiesPanel = ({
                     <label className="property-label">Label</label>
                     <input
                         type="text"
-                        value={selectedLabel}
-                        onChange={(e) => onLabelChange(e.target.value)}
+                        value={localLabel}
+                        onChange={(e) => setLocalLabel(e.target.value)}
+                        onBlur={() => onLabelChange(localLabel)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                                onLabelChange(localLabel);
+                                e.target.blur();
+                            }
+                        }}
                         className="property-input"
                         placeholder="Enter label..."
                     />

@@ -32,7 +32,7 @@ class AnnotationConverter {
         // Build category map from unique labels
         const categoryMap = new Map();
         annotations.forEach(ann => {
-            const label = ann.label || 'unknown';
+            const label = (ann.label !== null && ann.label !== undefined) ? ann.label : 'unknown';
             if (!categoryMap.has(label)) {
                 categoryMap.set(label, categoryMap.size + 1);
             }
@@ -45,7 +45,8 @@ class AnnotationConverter {
 
         const cocoAnnotations = annotations.map((ann, idx) => {
             const points = ann.points || [];
-            const label = ann.label || 'unknown';
+            // Preserve empty strings, only default if null/undefined
+            const label = (ann.label !== null && ann.label !== undefined) ? ann.label : 'unknown';
 
             // Calculate bounding box from points
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -231,10 +232,28 @@ class AnnotationConverter {
         }
 
         const lines = yoloText.trim().split('\n').filter(l => l.trim());
+        let extractedClasses = [...classNames];
+
+        // Check for metadata line (# classes: ...)
+        const metadataLine = lines.find(l => l.startsWith('# classes:'));
+        if (metadataLine) {
+            try {
+                const classString = metadataLine.replace('# classes:', '').trim();
+                if (classString) {
+                    // Extract classes preserving split
+                    extractedClasses = classString.split(',').map(c => c.trim());
+                }
+            } catch (e) {
+                console.warn('Failed to parse classes metadata', e);
+            }
+        }
+
+        // Filter out comment lines for validation and parsing
+        const validLines = lines.filter(l => !l.startsWith('#'));
 
         // Basic YOLO Check: Look at first non-empty line
-        if (lines.length > 0) {
-            const parts = lines[0].trim().split(/\s+/);
+        if (validLines.length > 0) {
+            const parts = validLines[0].trim().split(/\s+/);
             // Check if first part is a number (class_id) and we have at least 5 parts (id + 4 coords)
             if (parts.length < 5 || isNaN(parseFloat(parts[0]))) {
                 throw new Error('Invalid YOLO format: Lines must start with class_id followed by coordinates.');
@@ -242,11 +261,12 @@ class AnnotationConverter {
         }
 
         const categoryMap = new Map();
-        classNames.forEach((name, idx) => {
+        // Populate category map from extracted classes (or passed default)
+        extractedClasses.forEach((name, idx) => {
             categoryMap.set(idx, { id: idx + 1, name });
         });
 
-        const annotations = lines.map((line, idx) => {
+        const annotations = validLines.map((line, idx) => {
             const parts = line.trim().split(/\s+/);
             const classId = parseInt(parts[0]);
 
@@ -279,7 +299,7 @@ class AnnotationConverter {
             return {
                 id: idx + 1,
                 image_id: 1,
-                category_id: classId + 1,
+                category_id: classId + 1, // COCO uses 1-indexed categories
                 segmentation: [points],
                 bbox: [minX, minY, maxX - minX, maxY - minY],
                 area: (maxX - minX) * (maxY - minY),
@@ -331,6 +351,10 @@ class AnnotationConverter {
 
             return `${yoloClassId} ${normalizedParts.join(' ')}`;
         });
+
+        // Add metadata comment for re-importing
+        const classNames = sortedCategories.map(c => c.name).join(', ');
+        lines.push(`# classes: ${classNames}`);
 
         return {
             txt: lines.join('\n'),
