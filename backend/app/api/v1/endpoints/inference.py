@@ -25,8 +25,10 @@ router = APIRouter(tags=["inference"])
 @router.post("/detect-all", response_model=DetectAllResponse)
 async def detect_all(
     file: UploadFile = File(...),
-    model_name: str = Form("yolov8m-seg.pt"),
+    model_name: str = Form("yolo26x-seg.pt"),
     confidence: float = Form(0.5),
+    max_det: int = Form(300),
+    enable_tiling: bool = Form(True),
     inference_service = Depends(get_inference_service)
 ):
     """
@@ -40,7 +42,9 @@ async def detect_all(
         detections = inference_service.detect_all(
             img=img,
             model_name=model_name,
-            confidence=confidence
+            confidence=confidence,
+            max_det=max_det,
+            enable_tiling=enable_tiling
         )
         
         return DetectAllResponse(detections=detections)
@@ -61,6 +65,7 @@ async def segment_box(
     model_name: str = Form("sam2.1_l.pt"),
     confidence: float = Form(0.2),
     text_prompt: str = Form(None),
+    enable_yolo_verification: bool = Form(False),
     inference_service = Depends(get_inference_service)
 ):
     """
@@ -84,7 +89,8 @@ async def segment_box(
             box=(int(box.x), int(box.y), int(box.w), int(box.h)),
             model_name=model_name,
             confidence=confidence,
-            text_prompt=text_prompt
+            text_prompt=text_prompt,
+            enable_yolo_verification=enable_yolo_verification
         )
         
         return SegmentBoxResponse(detections=detections, suggestions=suggestions)
@@ -158,37 +164,60 @@ async def segment_by_text(
         from app.utils.image import masks_to_polygons
         import uuid
         
-        # Load YOLO-World
-        yolo_world_model = model_manager.get_model("yolov8l-world.pt")
-        if not yolo_world_model:
+        # Load YoloE-26 (Open-Vocab)
+        yoloe_name = "yolo26x-objv1-150.pt"
+        yoloe_model = model_manager.get_model(yoloe_name)
+        if not yoloe_model:
             try:
-                print("Loading YOLO-World on demand...")
-                yolo_world_model = YOLO("yolov8l-world.pt")
-                yolo_world_model.to(model_manager.device)
-                model_manager._models["yolov8l-world.pt"] = yolo_world_model
+                print(f"Loading {yoloe_name} on demand...")
+                yoloe_model = YOLO(yoloe_name)
+                yoloe_model.to(model_manager.device)
+                model_manager._models[yoloe_name] = yoloe_model
             except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Failed to load YOLO-World: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to load YoloE: {e}")
         
         # Set classes
         prompts = [p.strip() for p in text_prompt.split(',') if p.strip()]
         if not prompts:
             raise HTTPException(status_code=400, detail="Empty text prompt")
         
-        yolo_world_model.set_classes(prompts)
+        if hasattr(yoloe_model, 'set_classes'):
+            yoloe_model.set_classes(prompts)
+        else:
+            print(f"Model {yoloe_name} does not support set_classes. Filtering results manually.")
         
         # Process image
         image_bytes = await file.read()
         img = decode_image(image_bytes)
         
         # Stage 1: Detection
-        results = yolo_world_model.predict(img, conf=box_confidence, iou=iou_threshold, verbose=False)
+        results = yoloe_model.predict(img, conf=box_confidence, iou=iou_threshold, verbose=False)
         if not results or not results[0].boxes:
             return SegmentByTextResponse(detections=[])
         
         boxes = results[0].boxes
-        bboxes = boxes.xyxy.cpu().numpy()
-        class_ids = boxes.cls.cpu().numpy().astype(int)
-        confidences = boxes.conf.cpu().numpy()
+        
+        # Filter boxes if we couldn't filter pre-inference
+        valid_indices = []
+        if not hasattr(yoloe_model, 'set_classes'):
+            for i, cls_id in enumerate(boxes.cls.cpu().numpy()):
+                label = results[0].names[int(cls_id)]
+                if label in prompts:
+                    valid_indices.append(i)
+            
+            if not valid_indices:
+                return SegmentByTextResponse(detections=[])
+            
+            # Sub-select boxes
+            # Note: Indexing boxes directly might return a Boxes object or tokens, safest to convert to numpy first
+            # But let's work with the numpy arrays we extracted below
+            pass
+        else:
+             valid_indices = list(range(len(boxes)))
+
+        bboxes = boxes.xyxy.cpu().numpy()[valid_indices]
+        class_ids = boxes.cls.cpu().numpy().astype(int)[valid_indices]
+        confidences = boxes.conf.cpu().numpy()[valid_indices]
         
         if len(bboxes) == 0:
             return SegmentByTextResponse(detections=[])
@@ -218,7 +247,7 @@ async def segment_by_text(
                     break
                 
                 cls_id = class_ids[i]
-                label = prompts[cls_id] if cls_id < len(prompts) else "unknown"
+                label = results[0].names[int(cls_id)]
                 score = float(confidences[i])
                 
                 detections.append(Detection(
@@ -244,7 +273,7 @@ async def segment_by_text(
 async def segment_lasso(
     file: UploadFile = File(...),
     points_json: str = Form(...),
-    model_name: str = Form("yolov8m-seg.pt"),
+    model_name: str = Form("yolo26x-seg.pt"),
     confidence: float = Form(0.2),
     inference_service = Depends(get_inference_service)
 ):

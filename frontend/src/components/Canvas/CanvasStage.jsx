@@ -145,7 +145,7 @@ const CanvasStage = ({
                                     <Text
                                         x={ann.points[0]}
                                         y={ann.points[1] - 18}
-                                        text={ann.label}
+                                        text={ann.label + (ann.confidence ? ` (${(ann.confidence * 100).toFixed(0)}%)` : '')}
                                         fontSize={12}
                                         fill="#fff"
                                         padding={2}

@@ -418,6 +418,10 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
                     formData.append('text_prompt', textPrompt);
                 }
 
+                if (currentParams?.enable_yolo_verification !== undefined) {
+                    formData.append('enable_yolo_verification', currentParams.enable_yolo_verification);
+                }
+
                 const res = await axios.post(`${API_URL}/segment-box`, formData);
 
                 if (res.data.detections?.length > 0) {
@@ -434,6 +438,8 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
                     // For now, select the last one or clear selection
                     if (newIds.length > 0) selectAnnotation(newIds[newIds.length - 1]);
                     justFinishedDrawingRef.current = true;
+                } else {
+                    alert('No objects found in box.');
                 }
             } catch (err) {
                 console.error('AI Box Failed', err);
@@ -531,7 +537,8 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
         const hasTextPrompt = promptText.length > 0;
 
         // We infer the model capability from its name (simple but effective)
-        const isWorldModel = selectedModel && selectedModel.toLowerCase().includes('world');
+        // Checks for 'world' (legacy) or 'objv1' (YoloE / Open-Vocab)
+        const isWorldModel = selectedModel && (selectedModel.toLowerCase().includes('world') || selectedModel.toLowerCase().includes('objv1'));
         const isSamModel = selectedModel && selectedModel.toLowerCase().includes('sam');
         const supportsText = isWorldModel || isSamModel;
 
@@ -592,6 +599,14 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
                 if (currentParams?.retina_masks) {
                     formData.append('retina_masks', true);
                 }
+
+                if (currentParams?.max_det !== undefined) {
+                    formData.append('max_det', currentParams.max_det);
+                }
+
+                if (currentParams?.enable_tiling !== undefined) {
+                    formData.append('enable_tiling', currentParams.enable_tiling);
+                }
             }
 
             console.log(`Sending request to ${endpoint} with model ${selectedModel}`);
@@ -604,6 +619,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
                     type: 'poly',
                     points: d.points,
                     label: d.label || (hasTextPrompt && supportsText ? promptText : 'object'),
+                    confidence: d.confidence,
                     originalRawPoints: d.points
                 }));
 

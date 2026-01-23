@@ -57,7 +57,7 @@ function App() {
   // Training form state
   const [trainEpochs, setTrainEpochs] = useState(100);
   const [trainBatchSize, setTrainBatchSize] = useState(16);
-  const [trainBaseModel, setTrainBaseModel] = useState('yolov8m-seg.pt');
+  const [trainBaseModel, setTrainBaseModel] = useState('yolo26x-seg.pt');
   const [trainError, setTrainError] = useState('');
 
   // Import Modal State
@@ -518,6 +518,7 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
+
       // Escape key handling
       if (e.key === 'Escape') {
         if (drawTools.currentPolyPoints.length > 0) {
@@ -538,7 +539,7 @@ function App() {
       }
 
       // Backspace/Delete - undo last point when drawing polygon, else delete annotation
-      if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (e.key === 'Delete') {
         // If actively drawing a polygon, undo last point
         if (drawTools.tool === 'poly' && drawTools.currentPolyPoints.length > 0) {
           e.preventDefault();
@@ -563,7 +564,6 @@ function App() {
         annotationsHook.handleRedo();
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [drawTools, annotationsHook]);

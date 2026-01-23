@@ -7,7 +7,9 @@ export const MODEL_CONFIG = {
         parameters: [
             { key: 'conf', label: 'Confidence', type: 'slider', min: 0.0, max: 1.0, step: 0.01, default: 0.25, help: 'Minimum confidence score.' },
             { key: 'iou', label: 'IOU Threshold', type: 'slider', min: 0.0, max: 1.0, step: 0.01, default: 0.45, help: 'Intersection over Union threshold.' },
+            { key: 'max_det', label: 'Max Detections', type: 'slider', min: 1, max: 1000, step: 1, default: 300, help: 'Maximum number of objects to detect.' },
             { key: 'retina_masks', label: 'Retina Masks', type: 'switch', default: true, help: 'Generate high-resolution masks.' },
+            { key: 'enable_tiling', label: 'Enable Tiling', type: 'switch', default: false, help: 'Use SAHI slicing. Disable for faster, full-image inference.' },
             { key: 'tile_size', label: 'Tile Size', type: 'number', min: 320, max: 1500, step: 32, default: 640, help: 'Tile size for SAHI inference.' },
             { key: 'tile_overlap', label: 'Tile Overlap', type: 'slider', min: 0.0, max: 0.5, step: 0.05, default: 0.25, help: 'Overlap between tiles.' }
         ]
@@ -18,7 +20,8 @@ export const MODEL_CONFIG = {
         label: 'Segment Anything',
         parameters: [
             { key: 'box_padding', label: 'Box Padding', type: 'slider', min: 0, max: 100, step: 1, default: 0, help: 'Expands the input box by pixels.' },
-            { key: 'use_hq', label: 'Use HQ Model', type: 'switch', default: false, help: 'Use High-Quality model (slower).' }
+            { key: 'use_hq', label: 'Use HQ Model', type: 'switch', default: false, help: 'Use High-Quality model (slower).' },
+            { key: 'enable_yolo_verification', label: 'Verify with Yolo', type: 'switch', default: false, help: 'Use YOLO to verify text prompt grounding.' }
         ]
     }
 };

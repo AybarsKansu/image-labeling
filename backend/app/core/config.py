@@ -18,9 +18,9 @@ class Settings(BaseSettings):
     DATASET_DIR: Optional[Path] = Field(default=None)
     
     # Model settings
-    DEFAULT_YOLO_MODEL: str = "yolov8m-seg.pt"
+    DEFAULT_YOLO_MODEL: str = "yolo26x-seg.pt"
     DEFAULT_SAM_MODEL: str = "sam2.1_l.pt"
-    DEFAULT_YOLO_WORLD_MODEL: str = "yolov8l-world.pt"
+    DEFAULT_YOLO_WORLD_MODEL: str = "yolo26x-objv1-150.pt"
     
     # Inference settings
     TILE_SIZE: int = 640

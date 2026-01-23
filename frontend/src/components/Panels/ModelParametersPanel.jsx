@@ -90,30 +90,42 @@ const ModelParametersPanel = ({
                 let value = currentParams?.[param.key];
                 if (value === undefined) value = param.default;
 
+                // Conditional Rendering Logic
+                if (param.key === 'tile_size' || param.key === 'tile_overlap') {
+                    if (currentParams?.enable_tiling === false) return null;
+                }
+
                 return (
                     <div key={param.key} style={styles.group}>
 
                         {/* HEADER */}
                         <div style={styles.labelRow}>
                             <label>{param.label}</label>
-                            {param.type === 'slider' && (
-                                <span style={styles.value}>
-                                    {param.max <= 1 ? (value * 100).toFixed(0) + '%' : value}
-                                </span>
-                            )}
+                            {/* Display value for sliders is now handled by the input below */}
                         </div>
 
                         {/* CONTROLS */}
                         {param.type === 'slider' && (
-                            <input
-                                type="range"
-                                min={param.min}
-                                max={param.max}
-                                step={param.step}
-                                value={value}
-                                onChange={(e) => updateParam(param.key, parseFloat(e.target.value))}
-                                style={styles.inputRange}
-                            />
+                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                <input
+                                    type="range"
+                                    min={param.min}
+                                    max={param.max}
+                                    step={param.step}
+                                    value={value}
+                                    onChange={(e) => updateParam(param.key, parseFloat(e.target.value))}
+                                    style={styles.inputRange}
+                                />
+                                <input
+                                    type="number"
+                                    min={param.min}
+                                    max={param.max}
+                                    step={param.step}
+                                    value={value}
+                                    onChange={(e) => updateParam(param.key, parseFloat(e.target.value))}
+                                    style={{ ...styles.inputNumber, width: '60px', padding: '0.1rem' }}
+                                />
+                            </div>
                         )}
 
                         {param.type === 'number' && (

@@ -54,7 +54,7 @@ async def download_model(
         # Get updated model info
         models = model_manager.get_available_models()
         # Find the specific model we just downloaded to return its new state (is_downloaded=True)
-        model_info = next((m for m in models if m['id'] == request.model_id), None)
+        model_info = next((m for m in models if m.id == request.model_id), None)
         return DownloadModelResponse(success=True, message=message, model=model_info)
     
     # Determine appropriate status code based on error

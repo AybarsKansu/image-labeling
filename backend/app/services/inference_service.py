@@ -28,14 +28,17 @@ class InferenceService:
     def detect_all(
         self,
         img: np.ndarray,
-        model_name: str = "yolov8m-seg.pt",
+        model_name: str = "yolo26x-seg.pt",
         confidence: float = 0.5,
         tile_size: int = 640,
         tile_overlap: float = 0.25,
-        nms_threshold: float = 0.4
+        nms_threshold: float = 0.4,
+        max_det: int = 300,
+        enable_tiling: bool = True
     ) -> List[Detection]:
         """
-        Performs tiled object detection on an image.
+        Performs object detection on an image (tiled or standard).
+        Supports Segmentation, OBB, Pose, and Object Detection models.
         
         Args:
             img: OpenCV image (BGR)
@@ -44,19 +47,44 @@ class InferenceService:
             tile_size: Size of tiles
             tile_overlap: Overlap between tiles
             nms_threshold: NMS IoU threshold
+            max_det: Maximum detections to return
+            enable_tiling: Whether to use SAHI tiling
             
         Returns:
             List of Detection objects
         """
         img_h, img_w = img.shape[:2]
-        slices = get_slices(img_h, img_w, tile_size=tile_size, overlap=tile_overlap)
-        print(confidence)
         all_detections = []
-        print(f"Slicing image ({img_w}x{img_h}) into {len(slices)} tiles...")
         
         model = self._model_manager.get_model(model_name)
         if not model:
             raise ValueError(f"Model {model_name} not found")
+
+        # --- PATH A: Standard Inference (No Tiling) ---
+        if not enable_tiling:
+            print(f"Running standard inference on full image ({img_w}x{img_h})...")
+            results = model(
+                img,
+                retina_masks=True,
+                conf=confidence,
+                iou=nms_threshold,
+                agnostic_nms=True,
+                max_det=max_det,
+                verbose=False
+            )
+            result = results[0]
+            
+            # Use the dispatcher to parse results
+            all_detections = self._parse_yolo_result(result)
+            
+            print(f"Standard inference found {len(all_detections)} objects.")
+            return all_detections
+
+        # --- PATH B: Tiled Inference (SAHI) ---
+        slices = get_slices(img_h, img_w, tile_size=tile_size, overlap=tile_overlap)
+        print(f"Slicing image ({img_w}x{img_h}) into {len(slices)} tiles...")
+        
+        raw_detections = []
         
         for (sx1, sy1, sx2, sy2) in slices:
             tile = img[sy1:sy2, sx1:sx2]
@@ -74,63 +102,183 @@ class InferenceService:
             )
             result = results[0]
             
-            if result.masks:
-                polygons = masks_to_polygons(result.masks)
-                if result.boxes:
-                    for i, poly in enumerate(polygons):
-                        cls_id = int(result.boxes.cls[i])
-                        conf = float(result.boxes.conf[i])
-                        
-                        # Translate polygon to global coordinates
-                        global_poly = []
-                        min_x, min_y = float('inf'), float('inf')
-                        max_x, max_y = float('-inf'), float('-inf')
-                        
-                        for j in range(0, len(poly), 2):
-                            px = poly[j] + sx1
-                            py = poly[j+1] + sy1
-                            global_poly.extend([px, py])
-                            
-                            min_x = min(min_x, px)
-                            min_y = min(min_y, py)
-                            max_x = max(max_x, px)
-                            max_y = max(max_y, py)
-                        
-                        # Box for NMS: [x, y, w, h]
-                        bw = max_x - min_x
-                        bh = max_y - min_y
-                        box = [min_x, min_y, bw, bh]
-                        
-                        all_detections.append({
-                            "box": box,
-                            "score": conf,
-                            "class_id": cls_id,
-                            "label": result.names[cls_id],
-                            "points": global_poly
-                        })
+            # Use dispatcher with offset
+            tile_detections = self._parse_yolo_result(result, offset=(sx1, sy1))
+            all_detections.extend(tile_detections)
         
         if not all_detections:
             return []
         
+        # Prepare for NMS
+        # Convert Detection objects back to box format for safe_nms
+        # We need to compute bounding boxes from the polygons/points
+        nms_boxes = []
+        nms_scores = []
+        
+        for det in all_detections:
+            # Calculate bbox from points [x1, y1, x2, y2, ...]
+            xs = det.points[0::2]
+            ys = det.points[1::2]
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+            w = max_x - min_x
+            h = max_y - min_y
+            
+            nms_boxes.append([min_x, min_y, w, h])
+            nms_scores.append(det.confidence)
+
         # Apply NMS
-        nms_boxes = [d["box"] for d in all_detections]
-        nms_scores = [d["score"] for d in all_detections]
         keep_indices = safe_nms(nms_boxes, nms_scores, iou_threshold=nms_threshold)
         
-        # Build final detections
-        final_detections = []
-        for idx in keep_indices:
-            det = all_detections[idx]
-            final_detections.append(Detection(
-                id=str(uuid.uuid4()),
-                label=det["label"],
-                points=det["points"],
-                type="poly",
-                confidence=det["score"]
-            ))
+        final_detections = [all_detections[i] for i in keep_indices]
         
-        print(f"Merged {len(all_detections)} raw detections into {len(final_detections)} final objects.")
+        # Limit to max_det (sorted by confidence descending)
+        final_detections.sort(key=lambda x: x.confidence, reverse=True)
+        if len(final_detections) > max_det:
+            final_detections = final_detections[:max_det]
+        
+        print(f"Merged {len(all_detections)} raw detections into {len(final_detections)} final objects (Max: {max_det}).")
         return final_detections
+
+    def _parse_yolo_result(self, result: Any, offset: Tuple[int, int] = (0, 0)) -> List[Detection]:
+        """
+        Dispatcher method to parse YOLO results based on available data (Masks, OBB, Pose, Boxes).
+        
+        Args:
+            result: Ultralytics result object
+            offset: (x, y) offset to apply to coordinates (for tiling)
+            
+        Returns:
+            List of Detection objects
+        """
+        # Prioritize rich outputs: Masks > OBB > Keypoints > Boxes
+        if result.masks is not None:
+            return self._extract_segmentation(result, offset)
+        elif result.obb is not None:
+            return self._extract_obb(result, offset)
+        elif result.keypoints is not None:
+            return self._extract_pose(result, offset)
+        elif result.boxes is not None:
+            return self._extract_detection(result, offset)
+        
+        return []
+
+    def _extract_segmentation(self, result: Any, offset: Tuple[int, int]) -> List[Detection]:
+        """Extracts segmentation masks as polygons."""
+        detections = []
+        ox, oy = offset
+        polygons = masks_to_polygons(result.masks)
+        
+        for i, poly in enumerate(polygons):
+            cls_id = int(result.boxes.cls[i])
+            conf = float(result.boxes.conf[i])
+            label = result.names[cls_id]
+            
+            # Apply offset
+            if ox != 0 or oy != 0:
+                poly = [c + (ox if i % 2 == 0 else oy) for i, c in enumerate(poly)]
+            
+            detections.append(Detection(
+                id=str(uuid.uuid4()),
+                label=label,
+                points=poly,
+                type="poly",
+                confidence=conf
+            ))
+        return detections
+
+    def _extract_obb(self, result: Any, offset: Tuple[int, int]) -> List[Detection]:
+        """Extracts OBB as 4-point polygons."""
+        detections = []
+        ox, oy = offset
+        
+        # result.obb.xyxyxyxy -> [N, 4, 2]
+        obbs = result.obb.xyxyxyxy.cpu().numpy()
+        
+        for i, obb_pts in enumerate(obbs):
+            cls_id = int(result.obb.cls[i])
+            conf = float(result.obb.conf[i])
+            label = result.names[cls_id]
+            
+            # Flatten to [x1, y1, x2, y2, x3, y3, x4, y4]
+            poly = obb_pts.flatten().tolist()
+            
+            # Apply offset
+            if ox != 0 or oy != 0:
+                poly = [c + (ox if k % 2 == 0 else oy) for k, c in enumerate(poly)]
+            
+            detections.append(Detection(
+                id=str(uuid.uuid4()),
+                label=label,
+                points=poly,
+                type="poly", # OBB treated as polygon
+                confidence=conf
+            ))
+        return detections
+
+    def _extract_pose(self, result: Any, offset: Tuple[int, int]) -> List[Detection]:
+        """
+        Extracts Pose/Keypoints. 
+        Currently maps the bounding box to a polygon as valid geometry.
+        """
+        detections = []
+        ox, oy = offset
+        
+        # Fallback to boxes for geometry
+        boxes = result.boxes.xyxy.cpu().numpy()
+        
+        for i, box in enumerate(boxes):
+            cls_id = int(result.boxes.cls[i])
+            conf = float(result.boxes.conf[i])
+            label = result.names[cls_id]
+            
+            x1, y1, x2, y2 = box
+            
+            # Create rectangular polygon
+            poly = [x1, y1, x2, y1, x2, y2, x1, y2]
+            
+            # Apply offset
+            if ox != 0 or oy != 0:
+                poly = [c + (ox if k % 2 == 0 else oy) for k, c in enumerate(poly)]
+                
+            detections.append(Detection(
+                id=str(uuid.uuid4()),
+                label=label,
+                points=poly,
+                type="poly",
+                confidence=conf
+            ))
+        return detections
+
+    def _extract_detection(self, result: Any, offset: Tuple[int, int]) -> List[Detection]:
+        """Extracts standard object detection boxes as polygons."""
+        detections = []
+        ox, oy = offset
+        
+        boxes = result.boxes.xyxy.cpu().numpy()
+        
+        for i, box in enumerate(boxes):
+            cls_id = int(result.boxes.cls[i])
+            conf = float(result.boxes.conf[i])
+            label = result.names[cls_id]
+            
+            x1, y1, x2, y2 = box
+            
+            # Create rectangular polygon
+            poly = [x1, y1, x2, y1, x2, y2, x1, y2]
+            
+            # Apply offset
+            if ox != 0 or oy != 0:
+                poly = [c + (ox if k % 2 == 0 else oy) for k, c in enumerate(poly)]
+            
+            detections.append(Detection(
+                id=str(uuid.uuid4()),
+                label=label,
+                points=poly,
+                type="poly",
+                confidence=conf
+            ))
+        return detections
     
     def segment_box(
         self,
@@ -138,7 +286,8 @@ class InferenceService:
         box: Tuple[int, int, int, int],
         model_name: str = "sam2.1_l.pt",
         confidence: float = 0.2,
-        text_prompt: Optional[str] = None
+        text_prompt: Optional[str] = None,
+        enable_yolo_verification: bool = False
     ) -> Tuple[List[Detection], List[Suggestion]]:
         """
         Segments objects within a bounding box.
@@ -149,6 +298,7 @@ class InferenceService:
             model_name: Model to use
             confidence: Confidence threshold
             text_prompt: Optional label override
+            enable_yolo_verification: Validate text prompt with YOLO
             
         Returns:
             Tuple of (detections, suggestions)
@@ -157,15 +307,15 @@ class InferenceService:
         img_h, img_w = img.shape[:2]
         x1, y1, x2, y2 = x, y, x + w, y + h
         
-        print(f"DEBUG: segment_box image {img_w}x{img_h}, box: {x},{y} {w}x{h}, model: {model_name}")
+        print(f"DEBUG: segment_box image {img_w}x{img_h}, box: {x},{y} {w}x{h}, model: {model_name}, verification: {enable_yolo_verification}")
         
         detections = []
         suggestions = []
         
-        # YOLO-World validation if text_prompt is present
+        # YoloE validation if text_prompt is present AND enabled
         validated_label = text_prompt
-        if text_prompt and text_prompt.strip():
-            validated_label = self._validate_with_yolo_world(
+        if text_prompt and text_prompt.strip() and enable_yolo_verification:
+            validated_label = self._validate_with_yoloe(
                 img, (x1, y1, x2, y2), text_prompt.strip(), confidence
             )
         
@@ -183,7 +333,7 @@ class InferenceService:
         
         return detections, suggestions
     
-    def _validate_with_yolo_world(
+    def _validate_with_yoloe(
         self,
         img: np.ndarray,
         box_xyxy: Tuple[int, int, int, int],
@@ -191,25 +341,29 @@ class InferenceService:
         confidence: float
     ) -> str:
         """
-        Validates text prompt using YOLO-World.
+        Validates text prompt using YoloE-26 (Open Vocabulary).
         Returns validated label or 'object' if not found.
         """
         try:
             from ultralytics import YOLO
             
-            print(f"DEBUG: Running YOLO-World Pre-Check for '{text_prompt}'")
+            print(f"DEBUG: Running YoloE-26 Pre-Check for '{text_prompt}'")
             
-            yw_name = "yolov8l-world.pt"
-            yw_model = self._model_manager.get_model(yw_name)
+            # Using the new YoloE-26 Open-Vocab model
+            yoloe_name = "yolo26x-objv1-150.pt"
+            yoloe_model = self._model_manager.get_model(yoloe_name)
             
-            if not yw_model:
-                print(f"Loading {yw_name} for validation...")
-                yw_model = YOLO(yw_name)
-                yw_model.to(self._model_manager.device)
-                self._model_manager._models[yw_name] = yw_model
+            if not yoloe_model:
+                print(f"Loading {yoloe_name} for validation...")
+                yoloe_model = YOLO(yoloe_name)
+                yoloe_model.to(self._model_manager.device)
+                self._model_manager._models[yoloe_name] = yoloe_model
             
             # Set classes and run on crop
-            yw_model.set_classes([text_prompt])
+            # Check if model supports set_classes (YOLO-World)
+            supports_set_classes = hasattr(yoloe_model, 'set_classes')
+            if supports_set_classes:
+                yoloe_model.set_classes([text_prompt])
             
             x1, y1, x2, y2 = box_xyxy
             img_h, img_w = img.shape[:2]
@@ -222,9 +376,23 @@ class InferenceService:
             if crop.size == 0:
                 return "object"
             
-            val_results = yw_model.predict(crop, conf=confidence, verbose=False)
+            val_results = yoloe_model.predict(crop, conf=confidence, verbose=False)
             
             if len(val_results) > 0 and len(val_results[0].boxes) > 0:
+                # If we couldn't use set_classes, we must verify the detected label matches the prompt
+                if not supports_set_classes:
+                    # Check if any detection matches the text_prompt (case-insensitive)
+                    found_match = False
+                    for cls_id in val_results[0].boxes.cls:
+                        label = val_results[0].names[int(cls_id)]
+                        if label.lower() == text_prompt.lower():
+                            found_match = True
+                            break
+                    
+                    if not found_match:
+                         print(f"DEBUG: Validation Failed. Found objects but none matched '{text_prompt}'.")
+                         return "object"
+
                 print(f"DEBUG: Validation Passed. Found {len(val_results[0].boxes)} {text_prompt}(s)")
                 return text_prompt
             
@@ -232,7 +400,7 @@ class InferenceService:
             return "object"
             
         except Exception as e:
-            print(f"WARNING: YOLO-World Validation failed: {e}. Using original prompt.")
+            print(f"WARNING: YoloE Validation failed: {e}. Using original prompt.")
             return text_prompt
     
     def _segment_with_sam(

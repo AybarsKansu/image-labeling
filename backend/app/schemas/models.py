@@ -12,6 +12,9 @@ class ModelType(str, Enum):
     """Type of ML model based on its primary function."""
     DETECTION = "detection"
     SEGMENTATION = "segmentation"
+    OBB = "obb"
+    POSE = "pose"
+    CLASSIFICATION = "classification"
     HELPER = "helper"  # Models like SAM that assist other models
 
 

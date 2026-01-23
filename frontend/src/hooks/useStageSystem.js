@@ -53,7 +53,7 @@ export const useStageSystem = () => {
             });
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [imageObj]);
+    }, [imageObj, stageSize]);
 
     // --- Load image when URL changes ---
     useEffect(() => {

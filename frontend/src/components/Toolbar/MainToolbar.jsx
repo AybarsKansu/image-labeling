@@ -438,7 +438,7 @@ const MainToolbar = ({
                     onClick={onOpenTrainModal}
                     title="Train Model"
                 >
-                    🔥
+                    Train Model
                 </button>
             </div>
 

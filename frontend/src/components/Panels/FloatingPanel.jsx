@@ -116,6 +116,15 @@ const FloatingPanel = ({
                     onChange={(e) => setFilterText(e.target.value)}
                     className="filter-input"
                 />
+                {filterText && (
+                    <button
+                        className="clear-button"
+                        onClick={() => setFilterText("")}
+                        title="Clear"
+                    >
+                        ✕
+                    </button>
+                )}
             </div>
 
             {/* Label List */}

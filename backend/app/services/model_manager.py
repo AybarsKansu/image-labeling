@@ -205,7 +205,7 @@ class ModelManager:
             Model instance or None if not found
         """
         if not model_name:
-            model_name = "yolov8m-seg.pt"
+            model_name = "yolo26x-seg.pt"
         
         # 1. Try exact match in cache
         if model_name in self._models:

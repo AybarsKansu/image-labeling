@@ -56,12 +56,42 @@
 }
 
 .panel-filter {
+    position: relative;
     padding: 8px 12px;
     border-bottom: 1px solid #374151;
+    display: flex;
+    align-items: center;
+}
+
+.clear-button {
+    position: absolute;
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: #9ca3af;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 4px;
+    transition: color 0.2s;
+    line-height: 1;
+    z-index: 10;
+    pointer-events: auto;
+}
+
+.clear-button:hover {
+    color: #ffffff;
+}
+
+.panel-filter .filter-input {
+    padding-right: 30px;
 }
 
 .filter-input {
     width: 100%;
+    box-sizing: border-box;
     padding: 8px 12px;
     border: 1px solid #374151;
     border-radius: 6px;
