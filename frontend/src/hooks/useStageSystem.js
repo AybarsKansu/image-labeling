@@ -52,7 +52,8 @@ export const useStageSystem = () => {
                 scale: scale
             });
         }
-    }, [imageObj, stageSize]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [imageObj]);
 
     // --- Load image when URL changes ---
     useEffect(() => {

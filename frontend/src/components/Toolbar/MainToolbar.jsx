@@ -43,13 +43,21 @@ const MainToolbar = ({
     canUndo,
     canRedo,
 
+    // NEW: Load/Export handlers
+    onLoadAnnotations,
+    onExport,
+
     // Status
     isProcessing,
     saveMessage
 }) => {
     const fileInputRef = useRef(null);
+    const annotationInputRef = useRef(null);
     const [isToolsExpanded, setIsToolsExpanded] = useState(false);
+    const [isExportExpanded, setIsExportExpanded] = useState(false);
+    const [loadFormat, setLoadFormat] = useState('toon');
     const dropdownRef = useRef(null);
+    const exportDropdownRef = useRef(null);
 
     const tools = [
         { id: 'select', icon: '👆', label: 'Select' },
@@ -62,6 +70,20 @@ const MainToolbar = ({
         { id: 'eraser', icon: '🧹', label: 'Eraser' }
     ];
 
+    const exportFormats = [
+        { id: 'toon', label: 'TOON (.toon)', ext: '.toon' },
+        { id: 'yolo', label: 'YOLO (.txt)', ext: '.txt' },
+        { id: 'coco', label: 'COCO (.json)', ext: '.json' },
+        { id: 'voc', label: 'Pascal VOC (.xml)', ext: '.xml' }
+    ];
+
+    const loadFormats = [
+        { id: 'toon', label: 'TOON', accept: '.toon,.json' },
+        { id: 'yolo', label: 'YOLO', accept: '.txt' },
+        { id: 'coco', label: 'COCO', accept: '.json' },
+        { id: 'voc', label: 'Pascal VOC', accept: '.xml' }
+    ];
+
     const activeToolObj = tools.find(t => t.id === tool) || tools[0];
 
     // Close dropdown when clicking outside
@@ -70,19 +92,38 @@ const MainToolbar = ({
             if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
                 setIsToolsExpanded(false);
             }
+            if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target)) {
+                setIsExportExpanded(false);
+            }
         };
 
-        if (isToolsExpanded) {
+        if (isToolsExpanded || isExportExpanded) {
             document.addEventListener('mousedown', handleClickOutside);
         }
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
         };
-    }, [isToolsExpanded]);
+    }, [isToolsExpanded, isExportExpanded]);
 
     const handleToolSelect = (toolId) => {
         setTool(toolId);
         setIsToolsExpanded(false);
+    };
+
+    const handleAnnotationFileChange = (e) => {
+        const file = e.target.files?.[0];
+        if (file && onLoadAnnotations) {
+            onLoadAnnotations(file, loadFormat);
+        }
+        // Reset input
+        e.target.value = '';
+    };
+
+    const handleExportClick = (format) => {
+        if (onExport) {
+            onExport(format);
+        }
+        setIsExportExpanded(false);
     };
 
     return (
@@ -102,6 +143,36 @@ const MainToolbar = ({
                 >
                     📁 Open Image
                 </button>
+
+                {/* Load Annotations */}
+                <input
+                    ref={annotationInputRef}
+                    type="file"
+                    accept={loadFormats.find(f => f.id === loadFormat)?.accept || '.toon,.json,.txt,.xml'}
+                    onChange={handleAnnotationFileChange}
+                    style={{ display: 'none' }}
+                />
+                <div className="load-annotations-group">
+                    <select
+                        className="format-select"
+                        value={loadFormat}
+                        onChange={(e) => setLoadFormat(e.target.value)}
+                        title="Select annotation format to load"
+                    >
+                        {loadFormats.map(f => (
+                            <option key={f.id} value={f.id}>{f.label}</option>
+                        ))}
+                    </select>
+                    <button
+                        className="toolbar-btn secondary"
+                        onClick={() => annotationInputRef.current?.click()}
+                        disabled={!imageFile}
+                        title="Load annotations from file"
+                    >
+                        📥 Load
+                    </button>
+                </div>
+
                 {imageFile && (
                     <button
                         className="toolbar-btn danger"
@@ -271,15 +342,41 @@ const MainToolbar = ({
 
             <div className="toolbar-divider" />
 
-            {/* Save & Settings */}
+            {/* Save & Export Section */}
             <div className="toolbar-section">
+                {/* Save Project (TOON) */}
                 <button
                     className="toolbar-btn success"
                     onClick={onSave}
                     disabled={!imageFile}
+                    title="Save project as TOON format (local download)"
                 >
-                    💾 Save
+                    💾 Save Project
                 </button>
+
+                {/* Export Dropdown */}
+                <div className="export-dropdown-wrapper" ref={exportDropdownRef}>
+                    <button
+                        className={`toolbar-btn ${isExportExpanded ? 'active' : ''}`}
+                        onClick={() => setIsExportExpanded(!isExportExpanded)}
+                        disabled={!imageFile}
+                        title="Export annotations to various formats"
+                    >
+                        📤 Export ▾
+                    </button>
+
+                    <div className={`export-dropdown-menu ${isExportExpanded ? 'visible' : ''}`}>
+                        {exportFormats.map(f => (
+                            <button
+                                key={f.id}
+                                className="dropdown-item"
+                                onClick={() => handleExportClick(f.id)}
+                            >
+                                {f.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
 
                 {/* Augmentation Toggle */}
                 <button

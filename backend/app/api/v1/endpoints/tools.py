@@ -77,3 +77,36 @@ async def save_data(
     except Exception as e:
         print(f"Error in /save: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/save-entry")
+async def save_entry(
+    file: UploadFile = File(...),
+    annotations: str = Form(...),  # TOON JSON string
+    augment: str = Form("false"),
+    dataset_service = Depends(get_dataset_service)
+):
+    """
+    Saves image and TOON annotations to server disk with augmentation.
+    """
+    try:
+        toon_data = json.loads(annotations)
+        image_bytes = await file.read()
+        img = decode_image(image_bytes)
+        
+        do_augment = augment.lower() == "true"
+        
+        name_base = dataset_service.save_entry(
+            img=img,
+            toon_data=toon_data,
+            augment=do_augment
+        )
+        
+        msg = f"Saved {name_base}" + (" (+3 augments)" if do_augment else "")
+        return JSONResponse({"success": True, "message": msg})
+        
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON format")
+    except Exception as e:
+        print(f"Error in /save-entry: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

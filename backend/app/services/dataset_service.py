@@ -88,7 +88,87 @@ class DatasetService:
             self._save_pair("_noise", img_noise, annotations, name_base, ext)
         
         return name_base
-    
+
+    def save_entry(
+        self,
+        img: np.ndarray,
+        toon_data: Dict[str, Any],
+        augment: bool = False
+    ) -> str:
+        """
+        Saves image and TOON annotations to dataset/images and dataset/labels.
+        Includes augmentation: flip, dark, noise.
+        """
+        # Metadata
+        meta = toon_data.get("m", ["unknown.jpg", 0, 0])
+        original_name = Path(meta[0]).stem
+        img_w = meta[1]
+        
+        base_name = original_name
+        ext = ".jpg"
+        
+        # 1. Save Original
+        self._save_toon_pair("", img, toon_data, base_name, ext)
+        
+        if augment:
+            # 2. Dark
+            img_dark = cv2.convertScaleAbs(img, alpha=1.0, beta=-50)
+            self._save_toon_pair("_dark", img_dark, toon_data, base_name, ext)
+            
+            # 3. Noise
+            noise = np.random.normal(0, 25, img.shape)
+            img_noise = np.clip(img + noise, 0, 255).astype(np.uint8)
+            self._save_toon_pair("_noise", img_noise, toon_data, base_name, ext)
+            
+            # 4. Flip
+            img_flip = cv2.flip(img, 1)
+            
+            # Flip TOON coordinates
+            toon_flip = toon_data.copy()
+            # Deep copy data array
+            original_data = toon_data.get("d", [])
+            new_data = []
+            
+            for item in original_data:
+                # item is [cat_idx, [pts]]
+                cat_idx = item[0]
+                pts = item[1]
+                flipped_pts = []
+                for i in range(0, len(pts), 2):
+                    x = pts[i]
+                    y = pts[i+1]
+                    flipped_pts.append(img_w - x) # Flip X
+                    flipped_pts.append(y)         # Keep Y
+                new_data.append([cat_idx, flipped_pts])
+            
+            toon_flip["d"] = new_data
+            
+            self._save_toon_pair("_flip", img_flip, toon_flip, base_name, ext)
+            
+        return base_name
+
+    def _save_toon_pair(self, suffix, img, toon_data, base_name, ext):
+        """Helper to save image and .toon file."""
+        # Save Image
+        fname = f"{base_name}{suffix}{ext}"
+        img_path = self._settings.images_dir / fname
+        cv2.imwrite(str(img_path), img)
+        
+        # Save TOON
+        import json
+        tname = f"{base_name}{suffix}.toon"
+        lbl_path = self._settings.labels_dir / tname
+        
+        # Update filename in metadata for consistency
+        final_toon = toon_data.copy()
+        meta = final_toon.get("m", [])
+        if meta:
+            new_meta = [fname, meta[1], meta[2]]
+            final_toon["m"] = new_meta
+            
+        with open(lbl_path, "w") as f:
+            json.dump(final_toon, f)
+
     def _save_pair(
         self,
         suffix: str,

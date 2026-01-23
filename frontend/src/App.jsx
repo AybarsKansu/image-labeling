@@ -20,6 +20,7 @@ import { ModelManagerModal, PreprocessingModal, TrainPanel } from './components/
 // Config
 import { API_URL } from './constants/config';
 import { generateId } from './utils/helpers';
+import { AnnotationConverter } from './utils/annotationConverter';
 
 function App() {
   // ============================================
@@ -229,7 +230,7 @@ function App() {
     annotationsHook.reset();
   }, [stage, annotationsHook]);
 
-  // Handle save
+  // Handle save to server (with augmentation)
   const handleSave = useCallback(async () => {
     if (!stage.imageFile || annotationsHook.annotations.length === 0) {
       setSaveMessage('❌ No image or annotations to save!');
@@ -238,23 +239,173 @@ function App() {
     }
 
     try {
+      const imageInfo = {
+        name: stage.imageFile.name,
+        width: stage.imageObj?.width || 0,
+        height: stage.imageObj?.height || 0
+      };
+
+      // Convert internal state to TOON format
+      const toonData = AnnotationConverter.internalToToon(
+        annotationsHook.annotations,
+        imageInfo
+      );
+
       const formData = new FormData();
       formData.append('file', stage.imageFile);
-      formData.append('annotations', JSON.stringify(annotationsHook.annotations));
-      formData.append('image_name', stage.imageFile.name);
-      formData.append('augmentation', String(enableAugmentation));
+      formData.append('annotations', JSON.stringify(toonData));
+      formData.append('augment', String(enableAugmentation));
 
-      const res = await axios.post(`${API_URL}/save`, formData);
+      const res = await axios.post(`${API_URL}/save-entry`, formData);
+
       if (res.data.success) {
         setSaveMessage(`✅ ${res.data.message}`);
-        annotationsHook.reset();
+        // Optionally reset, but user might want to keep editing
+        // annotationsHook.reset(); 
       }
     } catch (err) {
       console.error('Save failed', err);
       setSaveMessage('❌ Save failed!');
     }
     setTimeout(() => setSaveMessage(null), 5000);
-  }, [stage.imageFile, annotationsHook, enableAugmentation]);
+  }, [stage.imageFile, stage.imageObj, annotationsHook.annotations, enableAugmentation]);
+
+  // Handle load annotations from file
+  const handleLoadAnnotations = useCallback(async (file, format) => {
+    if (!file || !stage.imageObj) {
+      setSaveMessage('❌ Please open an image first!');
+      setTimeout(() => setSaveMessage(null), 3000);
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const imageWidth = stage.imageObj.width;
+      const imageHeight = stage.imageObj.height;
+
+      let cocoData;
+
+      switch (format) {
+        case 'toon': {
+          const toonData = JSON.parse(text);
+          cocoData = AnnotationConverter.toonToCoco(toonData);
+          break;
+        }
+        case 'yolo': {
+          // Try to extract class names from a classes.txt if available
+          // For now, use generic names
+          cocoData = AnnotationConverter.yoloToCoco(text, imageWidth, imageHeight, []);
+          break;
+        }
+        case 'coco': {
+          cocoData = JSON.parse(text);
+          break;
+        }
+        case 'voc': {
+          cocoData = AnnotationConverter.vocToCoco(text, imageWidth, imageHeight);
+          break;
+        }
+        default:
+          throw new Error(`Unknown format: ${format}`);
+      }
+
+      // Convert COCO to internal state
+      const { annotations: newAnns } = AnnotationConverter.cocoToInternal(cocoData);
+
+      // Add unique IDs
+      const annsWithIds = newAnns.map(ann => ({
+        ...ann,
+        id: generateId()
+      }));
+
+      // Add to history and set annotations
+      annotationsHook.addToHistory(annotationsHook.annotations);
+      annotationsHook.setAnnotations(annsWithIds);
+
+      setSaveMessage(`✅ Loaded ${annsWithIds.length} annotations from ${format.toUpperCase()}!`);
+    } catch (err) {
+      console.error('Load failed', err);
+      setSaveMessage(`❌ Failed to load: ${err.message}`);
+    }
+    setTimeout(() => setSaveMessage(null), 5000);
+  }, [stage.imageObj, annotationsHook]);
+
+  // Handle export to various formats
+  const handleExport = useCallback((format) => {
+    if (!stage.imageFile || annotationsHook.annotations.length === 0) {
+      setSaveMessage('❌ No annotations to export!');
+      setTimeout(() => setSaveMessage(null), 3000);
+      return;
+    }
+
+    try {
+      const imageInfo = {
+        name: stage.imageFile.name,
+        width: stage.imageObj?.width || 0,
+        height: stage.imageObj?.height || 0
+      };
+
+      // Convert internal to COCO first
+      const cocoData = AnnotationConverter.internalToCoco(
+        annotationsHook.annotations,
+        imageInfo
+      );
+
+      let content;
+      let filename;
+      let mimeType;
+
+      switch (format) {
+        case 'toon': {
+          const toonData = AnnotationConverter.cocoToToon(cocoData);
+          content = JSON.stringify(toonData, null, 2);
+          filename = `${imageInfo.name.replace(/\.[^/.]+$/, '')}.toon`;
+          mimeType = 'application/json';
+          break;
+        }
+        case 'yolo': {
+          const { txt, classes } = AnnotationConverter.cocoToYolo(cocoData);
+          content = txt;
+          filename = `${imageInfo.name.replace(/\.[^/.]+$/, '')}.txt`;
+          mimeType = 'text/plain';
+          // Also log classes for user reference
+          console.log('YOLO Classes:', classes);
+          break;
+        }
+        case 'coco': {
+          content = JSON.stringify(cocoData, null, 2);
+          filename = `${imageInfo.name.replace(/\.[^/.]+$/, '')}_coco.json`;
+          mimeType = 'application/json';
+          break;
+        }
+        case 'voc': {
+          content = AnnotationConverter.cocoToVoc(cocoData);
+          filename = `${imageInfo.name.replace(/\.[^/.]+$/, '')}.xml`;
+          mimeType = 'application/xml';
+          break;
+        }
+        default:
+          throw new Error(`Unknown format: ${format}`);
+      }
+
+      // Create and trigger download
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setSaveMessage(`✅ Exported as ${format.toUpperCase()}!`);
+    } catch (err) {
+      console.error('Export failed', err);
+      setSaveMessage(`❌ Export failed: ${err.message}`);
+    }
+    setTimeout(() => setSaveMessage(null), 5000);
+  }, [stage.imageFile, stage.imageObj, annotationsHook.annotations]);
 
   // Handle detect all
   const handleDetectAll = useCallback(() => {
@@ -454,6 +605,8 @@ function App() {
 
         onDetectAll={handleDetectAll}
         onSave={handleSave}
+        onLoadAnnotations={handleLoadAnnotations}
+        onExport={handleExport}
         onUndo={annotationsHook.handleUndo}
         onRedo={annotationsHook.handleRedo}
         onClearAll={annotationsHook.handleClearAll}

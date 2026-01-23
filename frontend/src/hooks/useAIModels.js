@@ -139,7 +139,29 @@ export const useAIModels = (initialModel = null, textPrompt) => {
 
         setModel: setSelectedModel,
         downloadModel,
-        deleteModel
+        deleteModel,
+        startTraining: async (config) => {
+            try {
+                // Config should be { base_model, epochs, batch_size }
+                const formData = new FormData();
+                if (config.base_model) formData.append('base_model', config.base_model);
+                if (config.epochs) formData.append('epochs', config.epochs);
+                if (config.batch_size) formData.append('batch_size', config.batch_size);
+
+                await axios.post(`${API_URL}/train-model`, formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' }
+                });
+
+                setTrainingStatus(prev => ({ ...prev, isTraining: true }));
+                return { success: true };
+            } catch (err) {
+                console.error("Training failed:", err);
+                return {
+                    success: false,
+                    error: err.response?.data?.detail || err.message
+                };
+            }
+        }
     };
 
     return {
@@ -155,7 +177,11 @@ export const useAIModels = (initialModel = null, textPrompt) => {
         models, // Full registry list (objects)
         downloadedModels, // Ready-to-use list
         loadingModelIds, // Track async ops
-        isTraining: trainingStatus.isTraining
+        isTraining: trainingStatus.isTraining,
+        trainingProgress: trainingStatus.progress,
+        trainingMessage: trainingStatus.isTraining
+            ? `Epoch ${trainingStatus.epoch}/${trainingStatus.totalEpochs} | Loss: ${trainingStatus.loss?.toFixed(4) || '...'}`
+            : 'Idle'
     };
 };
 
