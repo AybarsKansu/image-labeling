@@ -153,7 +153,12 @@ class ModelManager:
         # Load discovered files
         for fp in local_files:
             name = os.path.basename(fp)
-            self._load_and_register(name, fp)
+            # Special check for our marker file
+            if "grounding" in name or "dino" in name:
+                # Just register existence
+                self._models[name] = "External Service"
+            else:
+                self._load_and_register(name, fp)
         
         return list(self._models.keys())
     
@@ -244,6 +249,30 @@ class ModelManager:
         Returns:
             Tuple of (success, message)
         """
+        # Special Case: Grounding DINO (Hugging Face)
+        if "grounding" in model_id.lower() or "dino" in model_id.lower():
+            try:
+                print(f"Triggering Grounding DINO download for {model_id}...")
+                from app.services.grounding_dino import grounding_dino_service
+                # This triggers the lazy load and download
+                grounding_dino_service._initialize() 
+                
+                # We need to ensure the system "thinks" it's downloaded so it shows up in the list.
+                # Since ModelManager checks for file existence in _models_dir, we might need a marker file.
+                marker_path = self._models_dir / model_id
+                if not marker_path.exists():
+                    with open(marker_path, 'w') as f:
+                        f.write("custom-model: huggingface")
+                
+                # Also register it in _models so it lists as loaded? 
+                # ModelManager lists keys of _models. 
+                # GroundingDino is managed by a separate service, but for UI consistency we can add a placeholder or reference.
+                self._models[model_id] = "External Service"
+                
+                return True, f"Successfully downloaded/loaded {model_id}"
+            except Exception as e:
+                return False, f"Failed to load Grounding DINO: {e}"
+
         # Validate model exists in registry
         if model_id not in self._registry:
             available = list(self._registry.keys())

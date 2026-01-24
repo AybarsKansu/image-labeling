@@ -16,12 +16,14 @@ class ModelType(str, Enum):
     POSE = "pose"
     CLASSIFICATION = "classification"
     HELPER = "helper"  # Models like SAM that assist other models
+    ZERO_SHOT = "zero_shot"
 
 
 class ModelFamily(str, Enum):
     """Family/architecture of the model."""
     YOLO = "yolo"
     SAM = "sam"
+    GROUNDING_DINO = "grounding_dino"
 
 
 class ModelInfo(BaseModel):

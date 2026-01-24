@@ -72,6 +72,16 @@ const ModelParametersPanel = ({
             accentColor: '#10b981', // emerald-500
             cursor: 'pointer'
         },
+        select: {
+            width: '100%',
+            background: '#111827', // gray-900
+            border: '1px solid #4b5563', // gray-600
+            color: 'white',
+            borderRadius: '0.25rem',
+            padding: '0.25rem 0.5rem',
+            fontSize: '0.875rem',
+            cursor: 'pointer'
+        },
         help: {
             fontSize: '0.65rem',
             color: '#9ca3af', // gray-400
@@ -92,7 +102,15 @@ const ModelParametersPanel = ({
 
                 // Conditional Rendering Logic
                 if (param.key === 'tile_size' || param.key === 'tile_overlap') {
-                    if (currentParams?.enable_tiling === false) return null;
+                    const isYoloTiling = currentParams?.enable_tiling === true;
+                    // For Grounding DINO, use inference_mode
+                    // Note: inference_mode might be undefined initially, resulting in standard
+                    const isDinoTiling = currentParams?.inference_mode === 'tiled';
+                    if (!isYoloTiling && !isDinoTiling) return null;
+                }
+
+                if (param.key === 'sam_sensitivity') {
+                    if (currentParams?.inference_mode !== 'smart_focus') return null;
                 }
 
                 return (
@@ -105,6 +123,18 @@ const ModelParametersPanel = ({
                         </div>
 
                         {/* CONTROLS */}
+                        {param.type === 'select' && (
+                            <select
+                                value={value}
+                                onChange={(e) => updateParam(param.key, e.target.value)}
+                                style={styles.select}
+                            >
+                                {param.options && param.options.map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                            </select>
+                        )}
+
                         {param.type === 'slider' && (
                             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                                 <input

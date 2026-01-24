@@ -269,6 +269,124 @@ async def segment_by_text(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/auto-label/grounding-dino", response_model=DetectAllResponse)
+async def auto_label_grounding_dino(
+    file: UploadFile = File(...),
+    text_prompt: str = Form(...),
+    box_threshold: float = Form(0.35),
+    text_threshold: float = Form(0.25),
+    inference_mode: str = Form("standard"),
+    tile_size: int = Form(640),
+    tile_overlap: float = Form(0.25),
+    sam_sensitivity: float = Form(0.5),
+    sam_model_name: str = Form("sam2.1_l.pt"),
+    use_sam: bool = Form(True),
+    inference_service = Depends(get_inference_service)
+):
+    """
+    Zero-shot detection using Grounding DINO + SAM (Advanced Modes).
+    """
+    try:
+        from app.services.grounding_dino import grounding_dino_service
+        from app.utils.image import masks_to_polygons
+        import uuid
+        import cv2
+        from PIL import Image
+        
+        image_bytes = await file.read()
+        img = decode_image(image_bytes)
+        
+        # Convert OpenCV image (numpy) to PIL Image
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(img_rgb)
+        
+        # Load SAM model if needed
+        model_manager = inference_service.model_manager
+        sam_model = None
+        
+        if inference_mode == "smart_focus" or use_sam:
+            sam_model = model_manager.get_model(sam_model_name)
+            if not sam_model:
+                SAM = model_manager.get_sam_class()
+                if SAM:
+                    try:
+                        sam_model = SAM(sam_model_name)
+                        sam_model.to(model_manager.device)
+                        model_manager._models[sam_model_name] = sam_model
+                    except Exception as e:
+                        print(f"Failed to load SAM model: {e}")
+                        sam_model = None
+
+        candidate_sam_model = sam_model if inference_mode == "smart_focus" else None
+
+        detections_data = grounding_dino_service.predict(
+            image=pil_image,
+            text_prompt=text_prompt,
+            box_threshold=box_threshold,
+            text_threshold=text_threshold,
+            inference_mode=inference_mode,
+            tile_size=tile_size,
+            tile_overlap=tile_overlap,
+            sam_model=candidate_sam_model,
+            sam_sensitivity=sam_sensitivity
+        )
+        
+        if not detections_data:
+            return DetectAllResponse(detections=[])
+            
+        # Prepare boxes for SAM
+        bboxes_list = [d["bbox"] for d in detections_data]
+        
+        detections = []
+        sam_succeeded = False
+
+        if use_sam and sam_model:
+            try:
+                # SAM expects numpy image (BGR is fine for Ultralytics)
+                sam_results = sam_model(img, bboxes=bboxes_list, verbose=False)
+                
+                if sam_results and sam_results[0].masks:
+                    polygons = masks_to_polygons(sam_results[0].masks)
+                    
+                    if len(polygons) == len(detections_data):
+                        sam_succeeded = True
+                        for i, (poly, d) in enumerate(zip(polygons, detections_data)):
+                            detections.append(Detection(
+                                id=str(uuid.uuid4()),
+                                label=d["label"],
+                                confidence=d["score"],
+                                points=poly,
+                                type="poly"
+                            ))
+                    else:
+                        print(f"SAM returned {len(polygons)} polygons for {len(detections_data)} boxes. Alignment issue.")
+            except Exception as e:
+                print(f"SAM inference failed: {e}")
+
+        # Fallback to boxes if SAM wasn't used or failed
+        if not sam_succeeded:
+            for d in detections_data:
+                bbox = d["bbox"]
+                x1, y1, x2, y2 = bbox
+                points = [x1, y1, x2, y1, x2, y2, x1, y2]
+                
+                detections.append(Detection(
+                    id=str(uuid.uuid4()),
+                    label=d["label"],
+                    confidence=d["score"],
+                    points=points,
+                    type="box" # Fallback to box
+                ))
+            
+        return DetectAllResponse(detections=detections)
+
+    except Exception as e:
+        print(f"Error in /auto-label/grounding-dino: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/segment-lasso", response_model=SegmentBoxResponse)
 async def segment_lasso(
     file: UploadFile = File(...),

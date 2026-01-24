@@ -36,7 +36,7 @@ yolo:
   # Model capable of finding any object via text command.
   - id: "yolo26x-objv1-150.pt"
     name: "YOLOE-26 XLarge (Open-Vocab)"
-    type: "detection"
+    type: "zero_shot"
     url: "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26x-objv1-150.pt"
     description: "Finds undefined objects using text or visual prompts."
 
@@ -55,3 +55,11 @@ sam:
     type: "helper"
     url: "https://github.com/ultralytics/assets/releases/download/v8.4.0/sam2.1_l.pt"
     description: "Highest quality generic segmentation. Best for 'Magic Wand' tool."
+
+grounding_dino:
+  # --- GROUNDING DINO ---
+  - id: "grounding-dino-base"
+    name: "Grounding DINO Base"
+    type: "zero_shot"
+    url: "https://huggingface.co/IDEA-Research/grounding-dino-base" 
+    description: "State-of-the-art open-set object detection using text prompts."

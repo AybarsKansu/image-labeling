@@ -4,6 +4,7 @@
 // import axios from 'axios';
 // import SettingsModal from './SettingsModal';
 // import PreprocessingModal from './PreprocessingModal';
+import { getModelConfig } from '../constants/modelConfig';
 
 // // --- Config ---
 // const API_URL = 'http://localhost:8000/api';
@@ -861,48 +862,6 @@
 
 //         // Sadece prompt varsa VE model destekliyorsa text-segmentation'a git
 //         if (hasPrompt && isWorldModel) {
-//             endpoint = '/segment-by-text';
-//             formData.append('text_prompt', textPrompt);
-//             // SAM modelini fallback olarak ayarla
-//             formData.append('sam_model_name', 'sam2.1_l.pt');
-//             formData.append('box_confidence', (textBoxConf / 100).toFixed(2));
-//             formData.append('iou_threshold', (textIou / 100).toFixed(2));
-//         } else {
-//             // Standart YOLO Algılaması
-//             formData.append('model_name', selectedModel);
-//             formData.append('confidence', (confidenceThreshold / 100).toFixed(2));
-//         }
-
-//         try {
-//             console.log(`Executing ${endpoint} using ${selectedModel}...`);
-//             const res = await axios.post(`${API_URL}${endpoint}`, formData);
-
-//             if (res.data.detections) {
-//                 const newAnns = res.data.detections.map(d => ({
-//                     id: d.id || crypto.randomUUID(),
-//                     type: d.type || 'poly',
-//                     points: d.points,
-//                     label: d.label || 'object',
-//                     originalRawPoints: d.points
-//                 }));
-
-//                 addToHistory(annotations);
-//                 setAnnotations(prev => [...prev, ...newAnns]);
-//                 setSaveMessage(`✅ Found ${newAnns.length} objects`);
-//             } else if (res.data.error) {
-//                 alert(`Backend Error: ${res.data.error}`);
-//             }
-//         } catch (err) {
-//             console.error('Detection failed', err);
-//             alert('Detection failed. Please check backend connection.');
-//         } finally {
-//             setIsProcessing(false);
-//             setTimeout(() => setSaveMessage(null), 3000);
-//         }
-//     };
-
-//     const handleSaveAnnotation = async () => {
-//         if (!imageFile) {
 //             setSaveMessage('❌ Please upload an image first!');
 //             setTimeout(() => setSaveMessage(null), 3000);
 //             return;

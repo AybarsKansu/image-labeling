@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { API_URL, ERASER_RADIUS } from '../constants/config';
+import { getModelConfig } from '../constants/modelConfig';
 import {
     distanceToSegment,
     doBoxesIntersect,
@@ -430,6 +431,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
                         type: d.type || 'poly',
                         points: d.points,
                         label: d.label || 'object',
+                        confidence: d.confidence,
                         suggestions: d.suggestions || [],
                         originalRawPoints: d.points
                     }));
@@ -540,10 +542,13 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
         // Checks for 'world' (legacy) or 'objv1' (YoloE / Open-Vocab)
         const isWorldModel = selectedModel && (selectedModel.toLowerCase().includes('world') || selectedModel.toLowerCase().includes('objv1'));
         const isSamModel = selectedModel && selectedModel.toLowerCase().includes('sam');
-        const supportsText = isWorldModel || isSamModel;
+        const isGroundingDino = selectedModel && (selectedModel.toLowerCase().includes('grounding') || selectedModel.toLowerCase().includes('dino'));
+
+        // Zero-shot models support text
+        const supportsText = isWorldModel || isSamModel || isGroundingDino;
 
         // 2. Transparency Check
-        // If there is text but the selected model is a standard YOLO (does not support text)
+        // If there is text but the selected model does not support text
         if (hasTextPrompt && !supportsText) {
             const confirmContinue = window.confirm(
                 `⚠️ Model Mismatch:\n\n` +
@@ -555,14 +560,10 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
             if (!confirmContinue) return;
         }
 
-        // If SAM model is selected and there is no text, warn the user (SAM alone cannot do detect-all)
-        if (isSamModel && !hasTextPrompt) {
-            alert("SAM requires a text prompt for generic detection. Please enter a class name (e.g. 'car', 'person').");
-            return;
-        }
-
-        if (isWorldModel && !hasTextPrompt) {
-            alert("Yolo World requires a text prompt for generic detection. Please enter a class name (e.g. 'car', 'person').");
+        // If a text-supported model is selected but no text prompt is provided, warn the user.
+        // This is crucial for models like SAM, Grounding DINO, and World models that rely on text.
+        if (supportsText && !hasTextPrompt) {
+            alert(`${selectedModel} requires a text prompt. Please enter a class name (e.g., 'car', 'person').`);
             return;
         }
 
@@ -573,14 +574,23 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
             const formData = new FormData();
             formData.append('file', imageFile);
 
-            // Endpoint and Parameter Decision
             let endpoint = '/detect-all';
 
-            // If there is text AND (the model supports it OR the user accepted to continue but backend will still use text)
-            // Logic here: If it is a world model, go to the text endpoint; otherwise go to detect-all.
-
-            if (hasTextPrompt && supportsText) {
-                // --- SCENARIO A: Text-Supported Model (World/SAM) ---
+            // --- SCENARIO: Grounding DINO ---
+            if (isGroundingDino) {
+                endpoint = '/auto-label/grounding-dino';
+                formData.append('text_prompt', promptText);
+                formData.append('box_threshold', currentParams?.box_threshold ?? 0.35);
+                formData.append('text_threshold', currentParams?.text_threshold ?? 0.25);
+                formData.append('inference_mode', currentParams?.inference_mode ?? 'standard');
+                formData.append('tile_size', currentParams?.tile_size ?? 640);
+                formData.append('tile_overlap', currentParams?.tile_overlap ?? 0.25);
+                formData.append('sam_sensitivity', currentParams?.sam_sensitivity ?? 0.5);
+                formData.append('sam_model_name', currentParams?.sam_model_name ?? 'sam2.1_l.pt');
+                formData.append('use_sam', currentParams?.use_sam ?? true);
+            }
+            // --- SCENARIO: Text-Supported Model (World/SAM) ---
+            else if (hasTextPrompt && supportsText) {
                 endpoint = '/segment-by-text';
                 formData.append('text_prompt', promptText);
                 formData.append('sam_model_name', isSamModel ? selectedModel : 'sam2.1_l.pt');
@@ -589,7 +599,7 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
                 formData.append('box_confidence', currentParams?.conf ?? 0.25);
                 formData.append('iou_threshold', currentParams?.iou ?? 0.45);
             } else {
-                // --- SCENARIO B: Standard Model (YOLOv8-seg, etc.) ---
+                // --- SCENARIO: Standard Model (YOLOv8-seg, etc.) ---
                 endpoint = '/detect-all';
                 formData.append('model_name', selectedModel);
                 // Dynamic Params
@@ -615,17 +625,25 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
 
             if (res.data.detections?.length > 0) {
                 const newAnns = res.data.detections.map(d => ({
-                    id: d.id || crypto.randomUUID(), // Native UUID may be safer than generateId()
+                    id: d.id || crypto.randomUUID(),
                     type: 'poly',
-                    points: d.points,
+                    points: d.points || [
+                        d.box.x, d.box.y,
+                        d.box.x + d.box.w, d.box.y,
+                        d.box.x + d.box.w, d.box.y + d.box.h,
+                        d.box.x, d.box.y + d.box.h
+                    ],
                     label: d.label || (hasTextPrompt && supportsText ? promptText : 'object'),
                     confidence: d.confidence,
-                    originalRawPoints: d.points
+                    originalRawPoints: d.points || [
+                        d.box.x, d.box.y,
+                        d.box.x + d.box.w, d.box.y,
+                        d.box.x + d.box.w, d.box.y + d.box.h,
+                        d.box.x, d.box.y + d.box.h
+                    ]
                 }));
 
                 setAnnotations(prev => [...prev, ...newAnns]);
-                // Optional user feedback
-                // setSaveMessage(`✅ Found ${newAnns.length} objects`);
             } else if (res.data.detections?.length === 0) {
                 alert("No objects found.");
             }

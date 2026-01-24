@@ -23,6 +23,20 @@ export const MODEL_CONFIG = {
             { key: 'use_hq', label: 'Use HQ Model', type: 'switch', default: false, help: 'Use High-Quality model (slower).' },
             { key: 'enable_yolo_verification', label: 'Verify with Yolo', type: 'switch', default: false, help: 'Use YOLO to verify text prompt grounding.' }
         ]
+    },
+    // Template for Grounding DINO
+    'grounding-dino': {
+        type: 'Grounding DINO',
+        label: 'Grounding DINO',
+        parameters: [
+            { key: 'box_threshold', label: 'Box Threshold', type: 'slider', min: 0.0, max: 1.0, step: 0.01, default: 0.35, help: 'Lower to detect more objects, raise to reduce noise.' },
+            { key: 'text_threshold', label: 'Text Threshold', type: 'slider', min: 0.0, max: 1.0, step: 0.01, default: 0.25, help: 'Similarity threshold for text matching.' },
+            { key: 'inference_mode', label: 'Inference Mode', type: 'select', default: 'standard', options: ['standard', 'tiled', 'smart_focus'], help: 'Strategy: Standard (Full), Tiled (Small Objs), Smart Focus (Large/Sparse).' },
+            { key: 'tile_size', label: 'Tile Size', type: 'number', min: 320, max: 2000, step: 32, default: 640, help: 'Size of tiles for Tiled Inference.' },
+            { key: 'tile_overlap', label: 'Tile Overlap', type: 'slider', min: 0.0, max: 0.5, step: 0.05, default: 0.25, help: 'Overlap ratio between tiles.' },
+            { key: 'sam_sensitivity', label: 'SAM Sensitivity', type: 'slider', min: 0.0, max: 1.0, step: 0.01, default: 0.5, help: 'Confidence threshold for Smart Focus candidate generation.' },
+            { key: 'use_sam', label: 'Refine with SAM', type: 'switch', default: true, help: 'Refine detections with Segment Anything Model.' }
+        ]
     }
 };
 
@@ -34,6 +48,14 @@ export const getModelConfig = (filename) => {
     if (!filename) return null;
 
     const lower = filename.toLowerCase();
+
+    // Check for Grounding DINO
+    if (lower.includes('grounding') || lower.includes('dino')) {
+        return {
+            ...MODEL_CONFIG['grounding-dino'],
+            label: filename
+        };
+    }
 
     // Check for YOLO models
     if (lower.includes('yolo')) {
