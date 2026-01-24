@@ -108,14 +108,19 @@ class ModelManager:
         """
         result = []
         
+        registry_ids = set(self._registry.keys())
+        
         for model_id, data in self._registry.items():
             # Check if model file exists locally
             model_path = self._models_dir / model_id
             is_downloaded = model_path.exists()
             
+            # Use name from registry
+            name = data.get('name', model_id)
+            
             model_info = ModelInfo(
                 id=model_id,
-                name=data['name'],
+                name=name,
                 type=ModelType(data['type']),
                 family=ModelFamily(data['family']),
                 url=data['url'],
@@ -123,6 +128,27 @@ class ModelManager:
                 is_downloaded=is_downloaded
             )
             result.append(model_info)
+            
+        # 2. Add local models NOT in registry (Custom)
+        local_files = glob.glob(str(self._models_dir / "*.pt"))
+        for fp in local_files:
+            fname = os.path.basename(fp)
+            if fname not in registry_ids:
+                # Infer type
+                m_type = ModelType.DETECTION
+                if "seg" in fname.lower():
+                    m_type = ModelType.SEGMENTATION
+                
+                model_info = ModelInfo(
+                    id=fname,
+                    name=f"Custom: {fname.replace('.pt', '')}",
+                    type=m_type,
+                    family=ModelFamily.YOLO, # Assume YOLO for custom models
+                    url="", # No URL
+                    description="Locally discovered custom model.",
+                    is_downloaded=True
+                )
+                result.append(model_info)
         
         return result
     

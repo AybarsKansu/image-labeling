@@ -180,11 +180,20 @@ export const useAIModels = (initialModel = null, textPrompt) => {
         deleteModel,
         startTraining: async (config) => {
             try {
-                // Config should be { base_model, epochs, batch_size }
+                // Config should be { base_model, epochs, batch_size, patience, optimizer, lr0, imgsz, custom_model_name, preprocess_params }
                 const formData = new FormData();
                 if (config.base_model) formData.append('base_model', config.base_model);
                 if (config.epochs) formData.append('epochs', config.epochs);
                 if (config.batch_size) formData.append('batch_size', config.batch_size);
+                if (config.patience) formData.append('patience', config.patience);
+                if (config.optimizer) formData.append('optimizer', config.optimizer);
+                if (config.lr0) formData.append('lr0', config.lr0);
+                if (config.imgsz) formData.append('imgsz', config.imgsz);
+                if (config.custom_model_name) formData.append('custom_model_name', config.custom_model_name);
+
+                if (config.preprocess_params) {
+                    formData.append('preprocess_params', JSON.stringify(config.preprocess_params));
+                }
 
                 await axios.post(`${API_URL}/train-model`, formData, {
                     headers: { 'Content-Type': 'multipart/form-data' }

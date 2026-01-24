@@ -35,6 +35,7 @@ export const MODEL_CONFIG = {
             { key: 'tile_size', label: 'Tile Size', type: 'number', min: 320, max: 2000, step: 32, default: 640, help: 'Size of tiles for Tiled Inference.' },
             { key: 'tile_overlap', label: 'Tile Overlap', type: 'slider', min: 0.0, max: 0.5, step: 0.05, default: 0.25, help: 'Overlap ratio between tiles.' },
             { key: 'sam_sensitivity', label: 'SAM Sensitivity', type: 'slider', min: 0.0, max: 1.0, step: 0.01, default: 0.5, help: 'Confidence threshold for Smart Focus candidate generation.' },
+            { key: 'sam_model_name', label: 'SAM Model', type: 'select', default: 'sam2.1_l.pt', options: ['sam2.1_l.pt', 'sam2.1_b.pt', 'sam2.1_t.pt'], help: 'Model for Smart Focus candidates & refinement.' },
             { key: 'use_sam', label: 'Refine with SAM', type: 'switch', default: true, help: 'Refine detections with Segment Anything Model.' }
         ]
     }
@@ -73,7 +74,16 @@ export const getModelConfig = (filename) => {
         };
     }
 
-    // Default Fallback
+    // Default Fallback / Custom YOLO Models
+    // If it's a .pt file and wasn't caught above, assume it's a YOLO model (e.g. custom training)
+    if (lower.endsWith('.pt')) {
+        return {
+            ...MODEL_CONFIG['yolo'],
+            label: filename
+        };
+    }
+
+    // Truly Unknown
     return {
         type: 'Unknown',
         label: filename,

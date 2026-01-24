@@ -1,8 +1,8 @@
 
-path: /home/aybars_kansu_han/Desktop/example/image-labeling/backend/dataset
-train: images
-val: images
+path: /home/aybars/work environment/Projects/image labeling/backend/dataset
+train: /home/aybars/work environment/Projects/image labeling/backend/dataset/autosplit_train.txt
+val: /home/aybars/work environment/Projects/image labeling/backend/dataset/autosplit_val.txt
 names:
-  0: cat_test
-  1: dog_test
-  2: car_test
+  0: aircraft
+  1: bird
+  2: drone

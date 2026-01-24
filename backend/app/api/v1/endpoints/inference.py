@@ -27,8 +27,9 @@ async def detect_all(
     file: UploadFile = File(...),
     model_name: str = Form("yolo26x-seg.pt"),
     confidence: float = Form(0.5),
+    nms_threshold: float = Form(0.25), # Aggressive NMS default
     max_det: int = Form(300),
-    enable_tiling: bool = Form(True),
+    enable_tiling: bool = Form(False), # Disable tiling by default
     inference_service = Depends(get_inference_service)
 ):
     """
@@ -44,7 +45,8 @@ async def detect_all(
             model_name=model_name,
             confidence=confidence,
             max_det=max_det,
-            enable_tiling=enable_tiling
+            enable_tiling=enable_tiling,
+            nms_threshold=nms_threshold
         )
         
         return DetectAllResponse(detections=detections)

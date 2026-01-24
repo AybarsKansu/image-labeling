@@ -56,6 +56,12 @@ const MainToolbar = ({
     const [isToolsExpanded, setIsToolsExpanded] = useState(false);
     const [isExportExpanded, setIsExportExpanded] = useState(false);
     const [isImportExpanded, setIsImportExpanded] = useState(false);
+
+    // Model Dropdown State
+    const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+    const [modelSearchTerm, setModelSearchTerm] = useState('');
+    const modelDropdownRef = useRef(null);
+
     const [loadFormat, setLoadFormat] = useState('toon');
     const dropdownRef = useRef(null);
     const exportDropdownRef = useRef(null);
@@ -99,6 +105,9 @@ const MainToolbar = ({
             }
             if (importDropdownRef.current && !importDropdownRef.current.contains(event.target)) {
                 setIsImportExpanded(false);
+            }
+            if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target)) {
+                setIsModelDropdownOpen(false);
             }
         };
 
@@ -302,34 +311,132 @@ const MainToolbar = ({
                 </button>
 
                 <div className="tooltip-container" style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    {/* Model Dropdown */}
-                    <select
-                        className="model-select-dropdown"
-                        value={selectedModel || ''}
-                        onChange={(e) => {
-                            if (onSelectModel) onSelectModel(e.target.value);
-                        }}
-                        style={{
-                            background: '#374151',
-                            color: 'white',
-                            border: '1px solid #4b5563',
-                            borderRadius: '4px',
-                            padding: '4px 8px',
-                            fontSize: '12px',
-                            height: '30px',
-                            outline: 'none',
-                            cursor: 'pointer',
-                            maxWidth: '160px'
-                        }}
+                    {/* CUSTOM SEARCHABLE MODEL DROPDOWN */}
+                    <div
+                        className="model-dropdown-wrapper"
+                        ref={modelDropdownRef}
+                        style={{ position: 'relative' }}
                     >
-                        <option value="" disabled hidden>✨ Select AI Model...</option>
-                        {/* Models are now objects { id, name, ... } */}
-                        {models && models.map(model => (
-                            <option key={model.id} value={model.id}>
-                                {model.name}
-                            </option>
-                        ))}
-                    </select>
+                        <button
+                            className="model-select-btn"
+                            onClick={() => {
+                                setIsModelDropdownOpen(!isModelDropdownOpen);
+                                if (!isModelDropdownOpen) setModelSearchTerm('');
+                            }}
+                            style={{
+                                background: '#374151',
+                                color: 'white',
+                                border: '1px solid #4b5563',
+                                borderRadius: '4px',
+                                padding: '4px 8px',
+                                fontSize: '12px',
+                                height: '32px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: '8px',
+                                cursor: 'pointer',
+                                minWidth: '180px',
+                                maxWidth: '220px'
+                            }}
+                            title={selectedModel || "Select Model"}
+                        >
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {models.find(m => m.id === selectedModel)?.name || '✨ Select AI Model...'}
+                            </span>
+                            <span style={{ fontSize: '10px', opacity: 0.7 }}>▼</span>
+                        </button>
+
+                        {isModelDropdownOpen && (
+                            <div className="model-dropdown-menu" style={{
+                                position: 'absolute',
+                                top: '100%',
+                                left: 0,
+                                width: '280px',
+                                background: '#1f2937',
+                                border: '1px solid #4b5563',
+                                borderRadius: '4px',
+                                marginTop: '4px',
+                                padding: '8px',
+                                zIndex: 1000,
+                                boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '8px'
+                            }}>
+                                {/* Search Input */}
+                                <input
+                                    type="text"
+                                    placeholder="Search models..."
+                                    value={modelSearchTerm}
+                                    onChange={(e) => setModelSearchTerm(e.target.value)}
+                                    autoFocus
+                                    style={{
+                                        width: '100%',
+                                        padding: '6px',
+                                        borderRadius: '4px',
+                                        border: '1px solid #4b5563',
+                                        background: '#111827',
+                                        color: 'white',
+                                        fontSize: '12px'
+                                    }}
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+
+                                {/* Model List */}
+                                <div className="model-list" style={{
+                                    maxHeight: '300px',
+                                    overflowY: 'auto',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '2px'
+                                }}>
+                                    {models
+                                        .filter(m => m.name.toLowerCase().includes(modelSearchTerm.toLowerCase()))
+                                        .map(model => (
+                                            <div
+                                                key={model.id}
+                                                onClick={() => {
+                                                    if (onSelectModel) onSelectModel(model.id);
+                                                    setIsModelDropdownOpen(false);
+                                                    setModelSearchTerm('');
+                                                }}
+                                                style={{
+                                                    textAlign: 'left',
+                                                    padding: '8px',
+                                                    background: selectedModel === model.id ? '#3b82f6' : 'transparent',
+                                                    color: 'white',
+                                                    borderRadius: '4px',
+                                                    cursor: 'pointer',
+                                                    fontSize: '12px',
+                                                    display: 'flex',
+                                                    flexDirection: 'column',
+                                                    borderBottom: '1px solid #374151'
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                    if (selectedModel !== model.id) e.currentTarget.style.background = '#374151';
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                    if (selectedModel !== model.id) e.currentTarget.style.background = 'transparent';
+                                                }}
+                                            >
+                                                <span style={{ fontWeight: 'bold' }}>{model.name}</span>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
+                                                    <span style={{ fontSize: '10px', opacity: 0.6 }}>{model.family || 'Custom'}</span>
+                                                    <span style={{ fontSize: '10px', opacity: 0.6, background: '#111827', padding: '1px 4px', borderRadius: '4px' }}>{model.type}</span>
+                                                </div>
+                                            </div>
+                                        ))}
+
+                                    {models.filter(m => m.name.toLowerCase().includes(modelSearchTerm.toLowerCase())).length === 0 && (
+                                        <div style={{ padding: '8px', textAlign: 'center', color: '#6b7280', fontSize: '12px' }}>
+                                            No models found.
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
 
                     {/* Manage Models Button */}
                     <button

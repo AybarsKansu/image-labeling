@@ -95,8 +95,8 @@ class InferenceService:
             results = model(
                 tile, 
                 retina_masks=True, 
-                conf=confidence, 
-                iou=0.5, 
+                conf=max(confidence, 0.35), # Slightly lower for tiles to capture small stuff 
+                iou=0.6, # Relaxed within tile
                 agnostic_nms=True, 
                 verbose=False
             )
@@ -127,8 +127,8 @@ class InferenceService:
             nms_boxes.append([min_x, min_y, w, h])
             nms_scores.append(det.confidence)
 
-        # Apply NMS
-        keep_indices = safe_nms(nms_boxes, nms_scores, iou_threshold=nms_threshold)
+        # Apply Global NMS to merge overlapping tiles
+        keep_indices = safe_nms(nms_boxes, nms_scores, iou_threshold=0.35) # Stricter global NMS
         
         final_detections = [all_detections[i] for i in keep_indices]
         

@@ -604,7 +604,8 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
                 formData.append('model_name', selectedModel);
                 // Dynamic Params
                 formData.append('confidence', currentParams?.conf ?? 0.25);
-                formData.append('iou', currentParams?.iou ?? 0.45);
+                // Map frontend 'iou' param to backend 'nms_threshold'
+                formData.append('nms_threshold', currentParams?.iou ?? 0.45);
 
                 if (currentParams?.retina_masks) {
                     formData.append('retina_masks', true);

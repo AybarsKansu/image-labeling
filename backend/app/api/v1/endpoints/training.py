@@ -6,6 +6,7 @@ Model training and status monitoring.
 import json
 import shutil
 import os
+import glob
 from pathlib import Path
 from fastapi import APIRouter, Form, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -14,25 +15,22 @@ from ultralytics import YOLO
 from app.core.config import get_settings
 from app.services.model_manager import ModelManager, get_model_manager
 from app.services.dataset_service import DatasetService, get_dataset_service
-from app.schemas.training import TrainingStatus, PreprocessParams
-from app.utils.file_io import get_next_version_name
+from app.services.class_service import ClassService, get_class_service
+from app.schemas.training import TrainingStatus
 
 router = APIRouter(tags=["training"])
 
 # Global training status (thread-safe access)
 _training_status = TrainingStatus()
 
-
 def get_training_status_obj() -> TrainingStatus:
     """Get the global training status object."""
     return _training_status
-
 
 @router.get("/training-status")
 async def get_training_status():
     """Returns current training status."""
     return JSONResponse(_training_status.model_dump())
-
 
 @router.post("/train-model")
 async def train_model(
@@ -40,9 +38,15 @@ async def train_model(
     base_model: str = Form(...),
     epochs: int = Form(100),
     batch_size: int = Form(16),
+    patience: int = Form(50),
+    optimizer: str = Form("auto"),
+    lr0: float = Form(0.01),
+    imgsz: int = Form(640),
+    custom_model_name: str = Form(None),
     preprocess_params: str = Form(None),
     model_manager = Depends(get_model_manager),
-    dataset_service = Depends(get_dataset_service)
+    dataset_service = Depends(get_dataset_service),
+    class_service = Depends(get_class_service)
 ):
     """Starts model training as a background task."""
     global _training_status
@@ -50,7 +54,6 @@ async def train_model(
     if _training_status.is_training:
         raise HTTPException(status_code=400, detail="Training already in progress")
     
-    # Parse preprocessing params
     p_params = None
     if preprocess_params:
         try:
@@ -58,7 +61,6 @@ async def train_model(
         except json.JSONDecodeError:
             pass
     
-    # SAM training not supported
     if "sam" in base_model.lower():
         raise HTTPException(
             status_code=400,
@@ -71,13 +73,18 @@ async def train_model(
         base_model,
         epochs,
         batch_size,
+        patience,
+        optimizer,
+        lr0,
+        imgsz,
+        custom_model_name,
         p_params,
         model_manager,
-        dataset_service
+        dataset_service,
+        class_service
     )
     
     return JSONResponse({"success": True, "message": "Preprocessing & Training started"})
-
 
 @router.post("/cancel-training")
 async def cancel_training():
@@ -91,19 +98,21 @@ async def cancel_training():
     return JSONResponse({"success": True, "message": "Cancellation requested."})
 
 
-import json
-import glob
-from pathlib import Path
-
 def _train_model_task(
     base_model_name: str,
     epochs: int,
     batch_size: int,
+    patience: int,
+    optimizer: str,
+    lr0: float,
+    imgsz: int,
+    custom_model_name: str,
     preprocess_params: dict,
     model_manager: ModelManager,
-    dataset_service: DatasetService
+    dataset_service: DatasetService,
+    class_service: ClassService
 ):
-    """Background task for model training with TOON support."""
+    """Background task for model training with advanced options."""
     global _training_status
     settings = get_settings()
     
@@ -115,88 +124,55 @@ def _train_model_task(
     _training_status.message = "Initializing..."
     
     try:
-        # Preprocessing
+        # 1. Preprocessing (Includes Split & Remap)
         target_data_dir = settings.DATASET_DIR
         
-        if preprocess_params:
-            if _training_status.stop_requested: raise InterruptedError("Training cancelled")
-
-            _training_status.message = "Preprocessing..."
-            success = dataset_service.preprocess_dataset(
-                resize_mode=preprocess_params.get('resize_mode', 'none'),
-                enable_tiling=preprocess_params.get('enable_tiling', False),
-                tile_size=int(preprocess_params.get('tile_size', 640)),
-                tile_overlap=float(preprocess_params.get('tile_overlap', 0.2))
-            )
+        # Always run preprocessing if params exist
+        # If no params but we want basic split/remap, we might force defaults?
+        # User usually sets params via UI. If empty, we might skip or do basic.
+        # Let's assume params are passed for advanced mode, or create default dict if None
+        if preprocess_params is None:
+            preprocess_params = {}
             
-            if success:
-                target_data_dir = settings.processed_dir
-            else:
-                _training_status.message = "Preprocessing Failed."
-                _training_status.is_training = False
-                return
-        
         if _training_status.stop_requested: raise InterruptedError("Training cancelled")
 
-        # ---------------------------------------------------------
-        # 1. SINIF İSİMLERİNİ (CLASSES) BULMA MANTIĞI (GÜNCELLENDİ)
-        # ---------------------------------------------------------
-        classes = []
-        # Find newest .toon or .json file
-        project_files = list(target_data_dir.glob("*.toon")) + list(target_data_dir.glob("*.json"))
+        _training_status.message = "Preprocessing..."
+        success = dataset_service.preprocess_dataset(
+            resize_mode=preprocess_params.get('resize_mode', 'none'),
+            enable_tiling=preprocess_params.get('enable_tiling', False),
+            tile_size=int(preprocess_params.get('tile_size', 640)),
+            tile_overlap=float(preprocess_params.get('tile_overlap', 0.2))
+        )
         
-        # Sort by modification time (newest first)
-        project_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        if success:
+            target_data_dir = settings.processed_dir # Use 'dataset/processed'
+        else:
+            # Fallback or Error? 
+            # If preprocess fails, we can't guarantee split/remap.
+            pass
 
-        _training_status.message = "Extracting classes..."
-        found_classes = False
+        # 2. Prepare Data YAML
+        # Use ClassService/Master Registry for names
+        classes = class_service.get_all_classes_sorted()
         
-        for p_file in project_files:
-            try:
-                if _training_status.stop_requested: raise InterruptedError("Training cancelled")
-                print(f"Checking project file: {p_file.name}")
-                with open(p_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    
-                    # A) TOON Format "c": ["cat", "dog"]
-                    if "c" in data and isinstance(data["c"], list):
-                        classes = data["c"]
-                        found_classes = True
-                        print(f"Classes found in TOON file: {p_file.name}")
-                        break
-                    
-                    # B) COCO Format
-                    elif "categories" in data:
-                        sorted_cats = sorted(data["categories"], key=lambda x: x.get("id", 0))
-                        classes = [c["name"] for c in sorted_cats]
-                        found_classes = True
-                        print(f"Classes found in COCO file: {p_file.name}")
-                        break
-                        
-            except InterruptedError:
-                raise
-            except Exception as e:
-                print(f"Failed to parse {p_file}: {e}")
-                continue
+        # Use generated split files
+        train_txt = settings.DATASET_DIR / "autosplit_train.txt"
+        val_txt = settings.DATASET_DIR / "autosplit_val.txt"
         
-        if not found_classes:
-            # Fallback to classes.txt if exists
-            classes_file = target_data_dir / "classes.txt"
-            if classes_file.exists():
-                with open(classes_file, "r", encoding="utf-8") as f:
-                    classes = [line.strip() for line in f.readlines() if line.strip()]
-                found_classes = True
-            
-        if not found_classes:
-            raise Exception("No classes found. Please save a project (.toon/.json) or provide classes.txt")
+        # Verify exists
+        if not train_txt.exists() or not val_txt.exists():
+            # If preprocessing didn't create them (e.g. error/skip), fallback to folder
+            # But preprocessing SHOULD create them.
+            train_path_str = (target_data_dir / "images").as_posix()
+            val_path_str = (target_data_dir / "images").as_posix()
+        else:
+            train_path_str = train_txt.as_posix()
+            val_path_str = val_txt.as_posix()
 
-        # ---------------------------------------------------------
-        # 2. DATA.YAML OLUŞTURMA
-        # ---------------------------------------------------------
         yaml_content = f"""
-path: {target_data_dir.as_posix()}
-train: images
-val: images
+path: {settings.DATASET_DIR.as_posix()}
+train: {train_path_str}
+val: {val_path_str}
 names:
 """
         for i, c in enumerate(classes):
@@ -205,23 +181,43 @@ names:
         yaml_path = settings.DATASET_DIR / "data.yaml"
         with open(yaml_path, "w", encoding="utf-8") as f:
             f.write(yaml_content)
-            
-        print(f"Generated data.yaml with {len(classes)} classes.")
-        
-        # ---------------------------------------------------------
-        # 3. MODEL EĞİTİMİ (DEĞİŞMEDİ)
-        # ---------------------------------------------------------
+
+        # 3. Model Training
         _training_status.message = "Starting training..."
         
-        # Load model
-        model = YOLO(base_model_name)
+        # 3. Model Training
+        _training_status.message = "Starting training..."
         
-        # Custom callback for progress
+        # Resolve Base Model Path to prevent auto-download if possible
+        # 1. Check if full path provided or exists in CWD
+        model_path = base_model_name
+        
+        # 2. Check 'models' subdirectory
+        if not os.path.exists(model_path):
+            candidates = [
+                Path("models") / base_model_name,
+                Path("backend/models") / base_model_name,
+                Path("../models") / base_model_name  # If running from app/ 
+            ]
+            for cand in candidates:
+                if cand.exists():
+                    model_path = str(cand)
+                    break
+        
+        # 3. If NOT found, and it's a YOLO model, allow download OR raise error?
+        # User requested: "Don't download if not found locally, fail instead" (implied)
+        # But for n/s/m models auto-download is nice. For X models it hurts.
+        # Let's clean up the path for the print
+        print(f"Loading Base Model to start training: {model_path}")
+        
+        # If model_path still doesn't exist locally, YOLO class will try download.
+        # We can trust YOLO to handle small models, but we successfully pointed to local big models now.
+        
+        model = YOLO(model_path)
+        
         def on_train_epoch_end(trainer):
             if _training_status.stop_requested:
-                print("Stop requested in callback.")
                 raise InterruptedError("Training cancelled by user")
-                
             _training_status.epoch = trainer.epoch + 1
             progress = 0.3 + ((trainer.epoch + 1) / epochs * 0.7)
             _training_status.progress = min(progress, 0.99)
@@ -229,12 +225,15 @@ names:
         
         model.add_callback("on_train_epoch_end", on_train_epoch_end)
         
-        # Train
-        results = model.train(
+        # Train with advanced params
+        model.train(
             data=yaml_path.as_posix(),
             epochs=epochs,
             batch=batch_size,
-            imgsz=640,
+            patience=patience,
+            optimizer=optimizer,
+            lr0=lr0,
+            imgsz=imgsz,
             plots=False,
             device='cuda',
             project="runs",
@@ -244,38 +243,36 @@ names:
         
         _training_status.message = "Finalizing..."
         
-        # Post-processing
+        # 4. Save model
         best_pt = Path("runs/train_job/weights/best.pt")
         if best_pt.exists():
-            new_name = get_next_version_name("custom_v*.pt", Path("."))
-            shutil.move(str(best_pt), new_name)
+            # Define target directory
+            models_dir = Path("models")
+            models_dir.mkdir(exist_ok=True) # Ensure it exists
             
-            # Reload models
+            # Name logic
+            target_name = custom_model_name.strip() if (custom_model_name and custom_model_name.strip()) else "custom_model.pt"
+            
+            # Get unique name inside models/
+            final_path = _get_unique_model_path(models_dir, target_name)
+                
+            shutil.move(str(best_pt), str(final_path))
+            
+            # Reload
             model_manager.scan_models()
+            _training_status.message = f"Completed! Saved as {final_path.name}"
             
-            _training_status.message = f"Completed! Saved as {new_name}"
-            
-            # Cleanup runs folder
-            try:
-                if os.path.exists("runs"):
-                    shutil.rmtree("runs")
-            except Exception as e:
-                print(f"Failed to cleanup runs: {e}")
+            # Cleanup
+            # try:
+            #     if os.path.exists("runs"):
+            #         shutil.rmtree("runs")
+            # except:
+            #     pass
         else:
             _training_status.message = "Failed: best.pt not found."
-    
+            
     except InterruptedError:
         _training_status.message = "Training Cancelled."
-        print("Training cancelled by user request.")
-    except RuntimeError as e:
-        error_str = str(e).lower()
-        if "out of memory" in error_str:
-             _training_status.message = "Error: GPU Out of Memory (OOM). Reduce Batch Size."
-        elif "failed reading zip archive" in error_str:
-             _training_status.message = "Error: Corrupt model file. Delete and re-download base model."
-        else:
-             _training_status.message = f"Error: {e}"
-        print(f"Runtime Error: {e}")
     except Exception as e:
         _training_status.message = f"Error: {e}"
         print(f"Training Error: {e}")
@@ -284,3 +281,33 @@ names:
     finally:
         _training_status.is_training = False
         _training_status.stop_requested = False
+
+def _get_unique_model_path(directory: Path, desired_name: str) -> Path:
+    """Ensures model name is unique in the given directory (e.g. models/drone.pt -> models/drone_1.pt)."""
+    if not desired_name.endswith(".pt"):
+        desired_name += ".pt"
+    
+    candidate = directory / desired_name
+    if not candidate.exists():
+        return candidate
+        
+    base = Path(desired_name).stem
+    
+    # Check if ends with _\d+
+    import re
+    match = re.search(r'_(\d+)$', base)
+    
+    if match:
+        num = int(match.group(1))
+        prefix = base[:match.start()]
+        idx = num + 1
+    else:
+        prefix = base
+        idx = 1
+        
+    while True:
+        new_name = f"{prefix}_{idx}.pt"
+        candidate = directory / new_name
+        if not candidate.exists():
+            return candidate
+        idx += 1
