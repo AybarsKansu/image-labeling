@@ -16,6 +16,7 @@ import { MainToolbar } from './components/Toolbar';
 import { FloatingPanel, PropertiesPanel, FloatingSelectionMenu, ModelParametersPanel } from './components/Panels';
 import DragDropZone from './components/Common/DragDropZone';
 import { ModelManagerModal, PreprocessingModal, TrainPanel, ClassImportModal } from './components/Modals';
+import EvaluationDashboard from './components/Evaluation/EvaluationDashboard';
 
 // Config
 import { API_URL } from './constants/config';
@@ -64,6 +65,10 @@ function App() {
   const [showClassImportModal, setShowClassImportModal] = useState(false);
   const [pendingImportFile, setPendingImportFile] = useState(null);
   const [pendingImportText, setPendingImportText] = useState('');
+
+  // Evaluation Dashboard State
+  const [showEvaluationModal, setShowEvaluationModal] = useState(false);
+
 
 
   // ============================================
@@ -650,6 +655,7 @@ function App() {
         onSelectModel={aiModels.setSelectedModel}
         onOpenModelManager={aiModels.actions.openModelManager}
         onOpenTrainModal={aiModels.actions.openTrainModal}
+        onOpenEvaluation={() => setShowEvaluationModal(true)}
 
         enableAugmentation={enableAugmentation}
         setEnableAugmentation={setEnableAugmentation}
@@ -812,6 +818,21 @@ function App() {
         onCancelTraining={aiModels.actions.cancelTraining}
         error={trainError}
       />
+
+      {/* Evaluation Dashboard Modal - Simple Full Screen Overlay */}
+      {showEvaluationModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', flexDirection: 'column'
+        }}>
+          <div style={{ padding: '10px 20px', background: '#121212', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'flex-end' }}>
+            <button onClick={() => setShowEvaluationModal(false)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '24px', cursor: 'pointer' }}>✖</button>
+          </div>
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <EvaluationDashboard availableModels={aiModels.models} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

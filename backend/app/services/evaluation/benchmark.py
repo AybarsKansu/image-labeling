@@ -38,7 +38,7 @@ class BenchmarkManager:
         Runs benchmarks on a list of models.
 
         Args:
-            models (List[Union[str, YOLO]]): A list of model paths or YOLO objects.
+            models (List[Union[str, YOLO]]): A list of model paths, official model names (e.g., 'yolov8n.pt'), or YOLO objects.
 
         Returns:
             pd.DataFrame: A comparative benchmark table.
@@ -48,38 +48,63 @@ class BenchmarkManager:
         for model_input in models:
             # Load model
             if isinstance(model_input, str):
-                model_path = model_input
+                model_path_or_name = model_input
                 try:
-                    model = YOLO(model_path)
-                    model_name = os.path.basename(model_path)
-                    model_size_mb = os.path.getsize(model_path) / (1024 * 1024)
+                    # Automatically pulls from Ultralytics if it's a known name like 'yolov8n.pt'
+                    model = YOLO(model_path_or_name)
+                    if os.path.exists(model_path_or_name):
+                         model_name = os.path.basename(model_path_or_name)
+                         model_size_mb = os.path.getsize(model_path_or_name) / (1024 * 1024)
+                    else:
+                         # Likely a pretrained model downloaded to cache or current dir
+                         model_name = model_path_or_name
+                         # Try to find the file to get size, or estimate/skip
+                         if hasattr(model, 'ckpt_path') and model.ckpt_path:
+                             model_size_mb = os.path.getsize(model.ckpt_path) / (1024 * 1024)
+                         else:
+                             model_size_mb = 0 
                 except Exception as e:
-                    logger.error(f"Failed to load model {model_path}: {e}")
+                    logger.error(f"Failed to load model {model_path_or_name}: {e}")
                     continue
             else:
                 model = model_input
                 model_name = model.ckpt_path if hasattr(model, 'ckpt_path') else "Custom Model"
-                model_size_mb = 0 # Cannot verify size of in-memory object easily without path
+                model_size_mb = 0 
 
             logger.info(f"Benchmarking model: {model_name}")
 
             # 1. Accuracy Metrics (using val mode)
             try:
-                # Force validation on the test set
-                metrics_obj = model.val(data=self.test_set_path, split='test', verbose=False)
+                # Task Alignment Fix:
+                # If model is segmentation (-seg) but we suspect the dataset is detection-only, 
+                # we should handle it. 
+                # However, ultralytics 'val' usually handles 'task' argument. 
+                # If we pass task='detect' to a segmentation model, it calculates box metrics.
+                # We can try to detect this intent or just always default to capturing box metrics 
+                # because box metrics exist for both detection and segmentation models.
+                
+                # Check if model is segmentation
+                is_seg = hasattr(model, 'task') and model.task == 'segment'
+                val_args = {'data': self.test_set_path, 'split': 'test', 'verbose': False}
+                
+                # Force detection mode if needed? 
+                # Actually, standard val() for seg model computes both box and mask if data supports it.
+                # If data is ONLY box, seg model val might fail or return 0 for mask.
+                # Use 'box' metrics primarily for comparison if mixed.
+                
+                metrics_obj = model.val(**val_args)
                 
                 # Extract metrics
-                # Note: Ultralytics metrics structure availability depends on version, usually:
-                # metrics.box.map    -> mAP50-95
-                # metrics.box.map50  -> mAP50
-                # metrics.box.mp     -> Mean Precision
-                # metrics.box.mr     -> Mean Recall
-                
+                # Always safely get box metrics first
                 map50 = metrics_obj.box.map50
                 map50_95 = metrics_obj.box.map
                 precision = metrics_obj.box.mp
                 recall = metrics_obj.box.mr
-                # F1 score is harmonic mean of P and R: 2*(P*R)/(P+R)
+                
+                # If these are 0 and it's a segmentation model, maybe it tried to evaluate masks and failed?
+                # But metrics_obj.box should be populated even for seg models (they output boxes too).
+                # If 0, it likely means the class mapping was wrong OR the dataset format didn't match.
+                
                 f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
 
             except Exception as e:
@@ -87,6 +112,11 @@ class BenchmarkManager:
                 map50 = map50_95 = precision = recall = f1_score = 0.0
 
             # 2. Performance & Resources (Inference Loop)
+            # Clean up before performance run to ensure fair start
+            torch.cuda.empty_cache()
+            import gc
+            gc.collect()
+            
             latency_ms, throughput_fps, peak_ram_mb, peak_vram_mb = self._measure_performance(model)
 
             results.append({
@@ -106,7 +136,6 @@ class BenchmarkManager:
             # Cleanup between models
             del model
             torch.cuda.empty_cache()
-            import gc
             gc.collect()
 
         df = pd.DataFrame(results)

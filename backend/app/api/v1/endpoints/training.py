@@ -14,6 +14,8 @@ from ultralytics import YOLO
 from app.core.config import get_settings
 from app.services.model_manager import ModelManager, get_model_manager
 from app.services.dataset_service import DatasetService, get_dataset_service
+from app.services.class_service import ClassService, get_class_service
+from app.services.training_service import training_service
 from app.schemas.training import TrainingStatus, PreprocessParams
 from app.utils.file_io import get_next_version_name
 

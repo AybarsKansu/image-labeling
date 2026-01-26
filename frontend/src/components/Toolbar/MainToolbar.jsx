@@ -46,6 +46,7 @@ const MainToolbar = ({
     // NEW: Load/Export handlers
     onLoadAnnotations,
     onExport,
+    onOpenEvaluation, // Action to open evaluation dashboard
 
     // Status
     isProcessing,
@@ -439,6 +440,15 @@ const MainToolbar = ({
                     title="Train Model"
                 >
                     Train Model
+                </button>
+
+                <button
+                    className="toolbar-btn"
+                    onClick={onOpenEvaluation}
+                    title="Evaluation Dashboard"
+                    style={{ background: '#7c3aed' }}
+                >
+                    📊 Benchmark
                 </button>
             </div>
 

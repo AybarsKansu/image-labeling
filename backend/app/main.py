@@ -43,6 +43,14 @@ def create_app() -> FastAPI:
     # Include API router
     app.include_router(v1_router, prefix="/api")
     
+    # Mount static files for analysis runs
+    from fastapi.staticfiles import StaticFiles
+    import os
+    runs_dir = os.path.join(os.getcwd(), "runs")
+    if not os.path.exists(runs_dir):
+        os.makedirs(runs_dir)
+    app.mount("/static/runs", StaticFiles(directory=runs_dir), name="runs")
+    
     # Global exception handler
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
