@@ -24,6 +24,7 @@ def safe_filename(name: str, default_ext: str = ".jpg") -> tuple[str, str]:
     ext = path.suffix or default_ext
     
     # Remove any path traversal or dangerous characters
+    # other than letters, numbers, dots, and underscores remove them and replace with underscore
     stem = re.sub(r'[^\w\-_.]', '_', stem)
     
     return stem, ext

@@ -32,8 +32,7 @@ async def detect_all(
     inference_service = Depends(get_inference_service)
 ):
     """
-    Detects ALL objects using tiled inference.
-    Splits image into overlapping tiles, runs detection, and merges results with NMS.
+    Detects ALL objects with or without tiled inference. Uses parameters to control selected model
     """
     try:
         image_bytes = await file.read()

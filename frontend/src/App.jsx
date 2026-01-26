@@ -365,7 +365,7 @@ function App() {
       formData.append('annotations', JSON.stringify(toonData));
       formData.append('augment', String(enableAugmentation));
 
-      const res = await axios.post(`${API_URL}/save-entry`, formData);
+      const res = await axios.post(`${API_URL}/save`, formData);
 
       if (res.data.success) {
         setSaveMessage(`✅ ${res.data.message}`);
