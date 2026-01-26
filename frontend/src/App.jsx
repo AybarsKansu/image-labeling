@@ -327,6 +327,19 @@ function App() {
         onClearAll={annotationsHook.handleClearAll} onExport={handleExport}
         canUndo={annotationsHook.canUndo} canRedo={annotationsHook.canRedo}
         isProcessing={drawTools.isProcessing} saveMessage={saveMessage}
+
+        // AI Model Props
+        imageFile={stage.imageFile}
+        textPrompt={textPrompt} setTextPrompt={setTextPrompt}
+        models={aiModels.models}
+        selectedModel={aiModels.selectedModel}
+        onSelectModel={aiModels.actions.setModel}
+        onOpenModelManager={aiModels.actions.openModelManager}
+        onOpenTrainModal={aiModels.actions.openTrainModal}
+        onOpenEvaluation={() => setShowEvaluationModal(true)}
+        onDetectAll={drawTools.handleDetectAll}
+        eraserSize={drawTools.eraserSize}
+        setEraserSize={drawTools.setEraserSize}
       />
 
       <div className="app-content">
