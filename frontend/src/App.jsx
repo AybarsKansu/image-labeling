@@ -9,11 +9,18 @@ import { useAnnotations } from './hooks/useAnnotations';
 import { useDrawTools } from './hooks/useDrawTools';
 import { useAIModels } from './hooks/useAIModels';
 import { usePolygonModifiers } from './hooks/usePolygonModifiers';
+import { useFileSystem } from './hooks/useFileSystem';
+import { useBackgroundSync } from './hooks/useBackgroundSync';
 
 // Components
 import { CanvasStage } from './components/Canvas';
 import { MainToolbar } from './components/Toolbar';
-import { FloatingPanel, PropertiesPanel, FloatingSelectionMenu, ModelParametersPanel } from './components/Panels';
+import FloatingPanel from './components/Panels/FloatingPanel';
+import PropertiesPanel from './components/Panels/PropertiesPanel';
+import FloatingSelectionMenu from './components/Panels/FloatingSelectionMenu';
+import ModelParametersPanel from './components/Panels/ModelParametersPanel';
+import FileExplorer from './components/Panels/FileExplorer';
+import RightSidebar from './components/Panels/RightSidebar';
 import DragDropZone from './components/Common/DragDropZone';
 import { ModelManagerModal, PreprocessingModal, TrainPanel, ClassImportModal } from './components/Modals';
 import EvaluationDashboard from './components/Evaluation/EvaluationDashboard';
@@ -45,6 +52,38 @@ function App() {
 
   // Polygon modifiers (simplify, densify, beautify)
   const polygonMods = usePolygonModifiers(annotationsHook, stage);
+
+  // File system (hybrid storage with IndexedDB)
+  const fileSystem = useFileSystem();
+
+  // Background sync for file uploads
+  const backgroundSync = useBackgroundSync(fileSystem.activeFileId);
+
+  // ============================================
+  // BRIDGE: File System to Canvas
+  // ============================================
+  const { activeFileData } = fileSystem;
+  const { setImageUrl, setImageFile, closeImage } = stage;
+  const { setAnnotations, clearSelection, reset: resetAnns } = annotationsHook;
+
+  useEffect(() => {
+    if (activeFileData) {
+      // Load image to stage
+      if (activeFileData.imageUrl) {
+        setImageUrl(activeFileData.imageUrl);
+      }
+      if (activeFileData.blob) {
+        setImageFile(activeFileData.blob);
+      }
+      // Load annotations
+      setAnnotations(activeFileData.annotations || []);
+      clearSelection();
+    } else {
+      // Clear stage and annotations if no file active
+      closeImage();
+      resetAnns();
+    }
+  }, [activeFileData, setImageUrl, setImageFile, closeImage, setAnnotations, clearSelection, resetAnns]);
 
   // ============================================
   // LOCAL STATE (UI-specific)
@@ -674,17 +713,19 @@ function App() {
       />
 
       <div className="app-content">
-        {/* Left Panel: Detected Labels */}
+        {/* Left Panel: File Explorer */}
         <div className="left-panel-container" style={{ width: leftPanelWidth }}>
-          {stage.imageObj && (
-            <FloatingPanel
-              docked={true}
-              annotations={annotationsHook.annotations}
-              filterText={drawTools.filterText}
-              setFilterText={drawTools.setFilterText}
-              onSelectLabel={(label) => drawTools.setFilterText(label)}
-            />
-          )}
+          <FileExplorer
+            files={fileSystem.files}
+            activeFileId={fileSystem.activeFileId}
+            onSelectFile={fileSystem.selectFile}
+            onIngestFiles={fileSystem.ingestFiles}
+            onClearAll={fileSystem.clearProject}
+            onRetryFile={fileSystem.retryFile}
+            syncStats={fileSystem.syncStats}
+            isProcessing={fileSystem.isProcessing}
+            processingProgress={fileSystem.processingProgress}
+          />
         </div>
 
         {/* Left Resizer */}
@@ -740,37 +781,32 @@ function App() {
           onMouseDown={() => setIsResizingRight(true)}
         />
 
-        {/* Right Panel: Properties */}
+        {/* Right Panel: Tabbed Sidebar */}
         <div className="right-panel-container" style={{ width: rightPanelWidth }}>
-          {annotationsHook.selectedAnn ? (
-            <PropertiesPanel
-              docked={true}
-              selectedAnn={annotationsHook.selectedAnn}
-              selectedLabel={annotationsHook.selectedLabel}
-              onLabelChange={handleLabelChange}
-              onDelete={annotationsHook.deleteSelected}
-              onSimplify={polygonMods.handleSimplify}
-              onDensify={polygonMods.handleDensify}
-              onReset={polygonMods.handleReset}
-              onBeautify={handleBeautify}
-              canModify={polygonMods.canModify}
-              canReset={polygonMods.canReset}
-              isProcessing={drawTools.isProcessing}
-              suggestions={annotationsHook.selectedAnn?.suggestions}
-            />
-          ) : aiModels.selectedModel ? (
-            <ModelParametersPanel
-              selectedModel={aiModels.selectedModel}
-              currentParams={aiModels.currentParams}
-              updateParam={aiModels.updateParam}
-            />
-          ) : (
-            <div style={{ padding: '20px', color: '#666', fontSize: '13px', fontStyle: 'italic', textAlign: 'center', marginTop: '50px' }}>
-              <p>Select a polygon to edit properties</p>
-              <p>or</p>
-              <p>Select a model to configure parameters</p>
-            </div>
-          )}
+          <RightSidebar
+            // Properties tab
+            selectedAnn={annotationsHook.selectedAnn}
+            selectedLabel={annotationsHook.selectedLabel}
+            onLabelChange={handleLabelChange}
+            onDelete={annotationsHook.deleteSelected}
+            onSimplify={polygonMods.handleSimplify}
+            onDensify={polygonMods.handleDensify}
+            onReset={polygonMods.handleReset}
+            onBeautify={handleBeautify}
+            canModify={polygonMods.canModify}
+            canReset={polygonMods.canReset}
+            isProcessing={drawTools.isProcessing}
+            suggestions={annotationsHook.selectedAnn?.suggestions}
+            // Model tab
+            selectedModel={aiModels.selectedModel}
+            currentParams={aiModels.currentParams}
+            updateParam={aiModels.updateParam}
+            // Labels tab
+            annotations={annotationsHook.annotations}
+            filterText={drawTools.filterText}
+            setFilterText={drawTools.setFilterText}
+            onSelectLabel={(label) => drawTools.setFilterText(label)}
+          />
         </div>
       </div>
 
@@ -829,7 +865,7 @@ function App() {
             <button onClick={() => setShowEvaluationModal(false)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '24px', cursor: 'pointer' }}>✖</button>
           </div>
           <div style={{ flex: 1, overflow: 'hidden' }}>
-            <EvaluationDashboard availableModels={aiModels.models} />
+            <EvaluationDashboard />
           </div>
         </div>
       )}

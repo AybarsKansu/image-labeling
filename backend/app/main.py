@@ -51,6 +51,12 @@ def create_app() -> FastAPI:
         os.makedirs(runs_dir)
     app.mount("/static/runs", StaticFiles(directory=runs_dir), name="runs")
     
+    # Mount static files for user uploads
+    uploads_dir = os.path.join(os.getcwd(), "uploads")
+    if not os.path.exists(uploads_dir):
+        os.makedirs(uploads_dir)
+    app.mount("/static/uploads", StaticFiles(directory=uploads_dir), name="uploads")
+    
     # Global exception handler
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):

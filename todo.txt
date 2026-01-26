@@ -1,5 +1,5 @@
 train logic, train file structure
 change train button logic, can be selected only if a model is selected
 
-even though model is not selected yet, it comes with default model. We should fix this.
+klasör seçme, klasördeki her dosyayı tek bir format dosyasına çıkarma özellileri. Yanda bi sidebar üzerinde
 

@@ -87,15 +87,16 @@ class BenchmarkManager:
                 is_seg = hasattr(model, 'task') and model.task == 'segment'
                 val_args = {'data': self.test_set_path, 'split': 'test', 'verbose': False}
                 
-                # Force detection mode if needed? 
-                # Actually, standard val() for seg model computes both box and mask if data supports it.
-                # If data is ONLY box, seg model val might fail or return 0 for mask.
-                # Use 'box' metrics primarily for comparison if mixed.
+                # Force detection metrics for segmentation models if we want box metrics
+                # This prevents 0 mAP if dataset is detection-only
+                if is_seg:
+                    val_args['task'] = 'detect'
                 
                 metrics_obj = model.val(**val_args)
                 
                 # Extract metrics
-                # Always safely get box metrics first
+                # For seg models using task='detect', box metrics will be in metrics_obj
+                # For regular models, they are already there.
                 map50 = metrics_obj.box.map50
                 map50_95 = metrics_obj.box.map
                 precision = metrics_obj.box.mp
