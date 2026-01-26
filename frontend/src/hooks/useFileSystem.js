@@ -306,6 +306,20 @@ export function useFileSystem() {
     }, []);
 
     const removeFile = useCallback(async (fileId) => {
+        const file = await db.files.get(fileId);
+        if (!file) return;
+
+        // 1. If synced, consider background delete (optional requirement based on user request)
+        if (file.status === FileStatus.SYNCED && file.backend_url) {
+            try {
+                const axios = (await import('axios')).default;
+                await axios.delete(`/api/files/delete/${fileId}`);
+            } catch (err) {
+                console.warn('Backend delete failed:', err);
+            }
+        }
+
+        // 2. Local delete
         await deleteFile(fileId);
 
         if (fileId === activeFileId) {
@@ -313,6 +327,24 @@ export function useFileSystem() {
             setActiveFileData(null);
         }
     }, [activeFileId]);
+
+    const renameClassActiveOnly = useCallback(async (oldName, newName) => {
+        if (!activeFileId || !activeFileData) return;
+        if (oldName === newName) return;
+
+        const updatedAnnotations = activeFileData.annotations.map(ann =>
+            ann.label === oldName ? { ...ann, label: newName } : ann
+        );
+
+        // Update active file in DB
+        await updateActiveAnnotations(updatedAnnotations);
+
+        // Refresh local state
+        setActiveFileData(prev => ({
+            ...prev,
+            annotations: updatedAnnotations
+        }));
+    }, [activeFileId, activeFileData, updateActiveAnnotations]);
 
     /**
      * Get sync statistics.
@@ -342,6 +374,7 @@ export function useFileSystem() {
         clearProject,
         retryFile,
         renameClass,
+        renameClassActiveOnly,
         selectFile,
         updateActiveAnnotations,
         removeFile,

@@ -11,7 +11,10 @@ const FileExplorer = ({
     onIngestFiles,
     onClearAll,
     onRetryFile,
-    onSaveAll, // New handler for "Save All for Training"
+    onRemoveFile,
+    onSaveAll,
+    isSyncEnabled,
+    onToggleSync,
     syncStats = { pending: 0, syncing: 0, synced: 0, total: 0 },
     isProcessing = false,
     processingProgress = { processed: 0, total: 0 }
@@ -103,13 +106,22 @@ const FileExplorer = ({
                     <h3>📁 Explorer</h3>
                     <div className="file-count">{files.length} items</div>
                 </div>
-                <button
-                    onClick={() => { if (window.confirm('Clear everything?')) onClearAll(); }}
-                    className="icon-btn"
-                    title="Clear Project"
-                >
-                    🗑️
-                </button>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <button
+                        className={`sync-toggle-btn ${isSyncEnabled ? 'active' : ''}`}
+                        onClick={onToggleSync}
+                        title={isSyncEnabled ? 'Cloud Sync Enabled' : 'Cloud Sync Disabled'}
+                    >
+                        {isSyncEnabled ? '☁️ ON' : '☁️ OFF'}
+                    </button>
+                    <button
+                        onClick={() => { if (window.confirm('Clear everything?')) onClearAll(); }}
+                        className="icon-btn"
+                        title="Clear Project"
+                    >
+                        🗑️
+                    </button>
+                </div>
             </div>
 
             <div className="upload-buttons">
@@ -130,7 +142,7 @@ const FileExplorer = ({
                 </div>
             )}
 
-            {syncStats.total > 0 && syncStats.pending > 0 && (
+            {isSyncEnabled && syncStats.total > 0 && syncStats.pending > 0 && (
                 <div className="sync-status">
                     <div className="sync-text">Syncing: {syncStats.synced}/{syncStats.total}</div>
                     <div className="progress-bar">
@@ -168,6 +180,7 @@ const FileExplorer = ({
                             const isActive = file.id === activeFileId;
                             const statusIcon = getStatusIcon(file.status);
                             const hasError = file.status === FileStatus.ERROR;
+                            const isSynced = file.status === FileStatus.SYNCED;
 
                             return (
                                 <div
@@ -184,8 +197,22 @@ const FileExplorer = ({
                                         )}
                                     </div>
                                     <div className="file-info">
-                                        <div className="file-name">{file.name}</div>
+                                        <div className="file-name-row">
+                                            <div className="file-name">{file.name}</div>
+                                            <button
+                                                className="remove-file-btn"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (window.confirm(`Remove ${file.name}?`)) onRemoveFile(file.id);
+                                                }}
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
                                         <div className="file-meta">
+                                            <span className="storage-status" title={isSynced ? 'Stored in Cloud' : 'Local Only'}>
+                                                {isSynced ? '🌐' : '💻'}
+                                            </span>
                                             <span
                                                 onClick={(e) => {
                                                     if (hasError) {

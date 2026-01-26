@@ -16,8 +16,8 @@ const API_BASE = 'http://localhost:8000/api';
 const CONCURRENCY_LIMIT = 2;
 const BATCH_DELAY = 200; // ms
 const POLL_INTERVAL = 3000; // ms
-
 export function useBackgroundSync(activeFileId = null) {
+    const [isSyncEnabled, setIsSyncEnabled] = useState(true);
     const [isUploading, setIsUploading] = useState(false);
     const [uploadQueue, setUploadQueue] = useState([]);
     const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0 });
@@ -25,11 +25,16 @@ export function useBackgroundSync(activeFileId = null) {
 
     const activeFileIdRef = useRef(activeFileId);
     const isUploadingRef = useRef(false);
+    const syncEnabledRef = useRef(isSyncEnabled);
 
-    // Keep activeFileId ref updated
+    // Keep refs updated
     useEffect(() => {
         activeFileIdRef.current = activeFileId;
     }, [activeFileId]);
+
+    useEffect(() => {
+        syncEnabledRef.current = isSyncEnabled;
+    }, [isSyncEnabled]);
 
     /**
      * Controlled sync loop.
@@ -38,7 +43,7 @@ export function useBackgroundSync(activeFileId = null) {
         let isStopped = false;
 
         const syncLoop = async () => {
-            if (isStopped || isUploadingRef.current) return;
+            if (isStopped || isUploadingRef.current || !syncEnabledRef.current) return;
 
             try {
                 // Get pending files (batch size = concurrency * 5 to have a buffer)
@@ -212,6 +217,8 @@ export function useBackgroundSync(activeFileId = null) {
     }, []);
 
     return {
+        isSyncEnabled,
+        setIsSyncEnabled,
         isUploading,
         isFlushing,
         uploadQueue,

@@ -72,22 +72,26 @@ export const useStageSystem = () => {
 
         const oldScale = imageLayout.scale;
         const pointer = stage.getPointerPosition();
-        const scaleBy = 1.1;
+        if (!pointer) return;
+
+        const scaleBy = 1.15;
         const newScale = e.evt.deltaY < 0 ? oldScale * scaleBy : oldScale / scaleBy;
 
-        // Calculate new position to zoom towards pointer
+        // Constraint scale
+        const constrainedScale = Math.min(Math.max(newScale, 0.05), 50);
+
         const mousePointTo = {
             x: (pointer.x - imageLayout.x) / oldScale,
             y: (pointer.y - imageLayout.y) / oldScale,
         };
 
         const newPos = {
-            x: pointer.x - mousePointTo.x * newScale,
-            y: pointer.y - mousePointTo.y * newScale,
+            x: pointer.x - mousePointTo.x * constrainedScale,
+            y: pointer.y - mousePointTo.y * constrainedScale,
         };
 
         setImageLayout({
-            scale: newScale,
+            scale: constrainedScale,
             x: newPos.x,
             y: newPos.y
         });

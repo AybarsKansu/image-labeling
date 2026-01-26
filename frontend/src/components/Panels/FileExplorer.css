@@ -111,6 +111,25 @@
     transition: background 0.2s;
 }
 
+.sync-toggle-btn {
+    padding: 4px 8px;
+    background: #2d3748;
+    border: 1px solid #4a5568;
+    border-radius: 4px;
+    color: #a0aec0;
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.sync-toggle-btn.active {
+    background: #2b6cb0;
+    border-color: #4299e1;
+    color: white;
+    box-shadow: 0 0 8px rgba(66, 153, 225, 0.4);
+}
+
 .file-row:hover {
     background: #1a1a3a;
 }
@@ -118,6 +137,31 @@
 .file-row.active {
     background: #2a2a5a;
     border-left: 3px solid #6366f1;
+}
+
+.file-name-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.remove-file-btn {
+    background: transparent;
+    border: none;
+    color: #4a5568;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 2px 4px;
+    opacity: 0;
+    transition: opacity 0.2s, color 0.2s;
+}
+
+.file-row:hover .remove-file-btn {
+    opacity: 1;
+}
+
+.remove-file-btn:hover {
+    color: #ef4444;
 }
 
 .file-thumbnail {
@@ -157,6 +201,11 @@
     align-items: center;
     gap: 8px;
     margin-top: 2px;
+}
+
+.storage-status {
+    font-size: 10px;
+    opacity: 0.8;
 }
 
 .label-indicator {

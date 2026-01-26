@@ -147,20 +147,6 @@ const MainToolbar = ({
         <div className="main-toolbar">
             {/* File Section */}
             <div className="toolbar-section">
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={onImageUpload}
-                    style={{ display: 'none' }}
-                />
-                <button
-                    className="toolbar-btn primary"
-                    onClick={() => fileInputRef.current?.click()}
-                >
-                    📁 Open Image
-                </button>
-
                 {/* Load Annotations Dropdown */}
                 <input
                     ref={annotationInputRef}
@@ -215,15 +201,6 @@ const MainToolbar = ({
                         ))}
                     </div>
                 </div>
-
-                {imageFile && (
-                    <button
-                        className="toolbar-btn danger"
-                        onClick={onCloseImage}
-                    >
-                        ✖ Close
-                    </button>
-                )}
             </div>
 
             <div className="toolbar-divider" />

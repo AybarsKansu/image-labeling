@@ -165,7 +165,7 @@ const CanvasStage = ({
                                             stroke={strokeColor} // Use high contrast color
                                             strokeWidth={2}
                                             draggable={true}
-                                            onDragMove={(e) => onVertexDrag(e, i, pi)}
+                                            onDragMove={(e) => onVertexDrag(e, ann.id, pi)}
                                         />
                                     );
                                 })}

@@ -229,9 +229,17 @@ function App() {
     }
   }, [drawTools]);
 
+  // Space-bar panning state
+  const [isSpaceDown, setIsSpaceDown] = useState(false);
+
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
+      if (e.code === 'Space' && !isSpaceDown) {
+        setIsSpaceDown(true);
+        if (drawTools.tool !== 'pan') drawTools.setTool('pan');
+      }
+
       if (e.key === 'Escape') {
         if (drawTools.currentPolyPoints.length > 0) drawTools.setCurrentPolyPoints([]);
         else if (drawTools.isDrawing) drawTools.resetToolState();
@@ -245,9 +253,39 @@ function App() {
         else annotationsHook.deleteSelected();
       }
     };
+
+    const handleKeyUp = (e) => {
+      if (e.code === 'Space') {
+        setIsSpaceDown(false);
+        drawTools.setTool('select');
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [drawTools, annotationsHook]);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [drawTools, annotationsHook, isSpaceDown]);
+
+  // Enhanced Stage Handlers
+  const handleMouseDown = useCallback((e) => {
+    // Middle click (button 1) triggers pan regardless of tool
+    if (e.evt.button === 1) {
+      drawTools.setTool('pan');
+      return;
+    }
+    drawTools.handleMouseDown(e);
+  }, [drawTools]);
+
+  const handleMouseUp = useCallback((e) => {
+    if (e.evt.button === 1) {
+      drawTools.setTool('select');
+      return;
+    }
+    drawTools.handleMouseUp(e);
+  }, [drawTools]);
 
   // Layout Resizing
   const [leftPanelWidth, setLeftPanelWidth] = useState(250);
@@ -297,7 +335,10 @@ function App() {
             files={fileSystem.files} activeFileId={fileSystem.activeFileId}
             onSelectFile={fileSystem.selectFile} onIngestFiles={fileSystem.ingestFiles}
             onClearAll={fileSystem.clearProject} onRetryFile={fileSystem.retryFile}
+            onRemoveFile={fileSystem.removeFile}
             onSaveAll={handleSaveAll} syncStats={fileSystem.syncStats}
+            isSyncEnabled={backgroundSync.isSyncEnabled}
+            onToggleSync={() => backgroundSync.setIsSyncEnabled(!backgroundSync.isSyncEnabled)}
             isProcessing={fileSystem.isProcessing} processingProgress={fileSystem.processingProgress}
           />
         </div>
@@ -339,7 +380,7 @@ function App() {
             updateParam={aiModels.updateParam} annotations={annotationsHook.annotations}
             filterText={drawTools.filterText} setFilterText={drawTools.setFilterText}
             onSelectLabel={(l) => drawTools.setFilterText(l)}
-            onRenameLabel={(o, n) => fileSystem.renameClass(o, n, fileSystem.classNames, fileSystem.setClassNames)}
+            onRenameLabel={(o, n) => fileSystem.renameClassActiveOnly(o, n)}
           />
         </div>
       </div>

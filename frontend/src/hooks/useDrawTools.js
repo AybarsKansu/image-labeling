@@ -505,19 +505,23 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
     }, [tool, currentPolyPoints, getRelativePointerPosition, addAnnotation, selectAnnotation, clearSelection, getClickedShape, annotations]);
 
     // --- Vertex Drag Handler ---
-    const handleVertexDrag = useCallback((e, polyIndex, pointIndex) => {
+    const handleVertexDrag = useCallback((e, annId, pointIndex) => {
         const newPos = e.target.position();
-        const newAnns = [...annotations];
-        const ann = { ...newAnns[polyIndex] };
-        const newPoints = [...ann.points];
+        setAnnotations(prev => {
+            const newAnns = [...prev];
+            const idx = newAnns.findIndex(a => a.id === annId);
+            if (idx === -1) return prev;
 
-        newPoints[pointIndex] = newPos.x;
-        newPoints[pointIndex + 1] = newPos.y;
+            const ann = { ...newAnns[idx] };
+            const newPoints = [...ann.points];
+            newPoints[pointIndex] = newPos.x;
+            newPoints[pointIndex + 1] = newPos.y;
 
-        ann.points = newPoints;
-        newAnns[polyIndex] = ann;
-        setAnnotations(newAnns);
-    }, [annotations, setAnnotations]);
+            ann.points = newPoints;
+            newAnns[idx] = ann;
+            return newAnns;
+        });
+    }, [setAnnotations]);
 
     // --- Detect All Handler ---
     // Conditionally routes to /detect-all (YOLO) or /segment-by-text (SAM/CLIP)
