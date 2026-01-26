@@ -2,6 +2,7 @@
  * IndexedDB Database using Dexie.js
  * 
  * Schema for file management with hybrid storage strategy.
+ * Version 3: Added 'path' for hierarchical file explorer.
  */
 
 import Dexie from 'dexie';
@@ -11,11 +12,9 @@ export const db = new Dexie('ImageLabelingDB');
 // Define schema
 // Note: Only indexed fields are listed in the schema string.
 // blob, thumbnail, label_data are stored but not indexed for performance.
-db.version(2).stores({
-    files: '++id, name, baseName, type, status, retry_count, backend_url, paired_label_id, created_at',
-    // Additional table for label files if needed separately
-    labels: '++id, name, type, status, backend_url, paired_image_id, created_at',
-    // Global settings (e.g., classes.txt content)
+db.version(3).stores({
+    files: '++id, name, baseName, path, type, status, retry_count, backend_url, paired_label_id, created_at',
+    // Global settings (e.g., classes map)
     settings: 'key'
 });
 

@@ -94,6 +94,7 @@ export function useFileSystem() {
                     // Update existing record with image data
                     await db.files.update(existing.id, {
                         name: img.name,
+                        path: img.path || '',
                         blob: img.blob,
                         thumbnail: img.thumbnail,
                         width: img.width,
@@ -105,6 +106,7 @@ export function useFileSystem() {
                     await db.files.add({
                         name: img.name,
                         baseName: img.baseName,
+                        path: img.path || '',
                         type: 'image',
                         blob: img.blob,
                         thumbnail: img.thumbnail,
@@ -127,6 +129,7 @@ export function useFileSystem() {
                     // Update existing record with label data
                     await db.files.update(existing.id, {
                         label_data: label.data,
+                        path: existing.path || label.path || '', // Prefer image path
                         // If it was missing-label, it now has both.
                         status: existing.blob ? FileStatus.PENDING : FileStatus.MISSING_IMAGE
                     });
@@ -135,6 +138,7 @@ export function useFileSystem() {
                     await db.files.add({
                         name: `(Missing Image) ${label.baseName}`,
                         baseName: label.baseName,
+                        path: label.path || '',
                         type: 'image', // Still categorized as image record for UI consistency
                         blob: null,
                         thumbnail: null,
@@ -337,11 +341,57 @@ export function useFileSystem() {
         ingestFiles,
         clearProject,
         retryFile,
+        renameClass,
         selectFile,
         updateActiveAnnotations,
         removeFile,
         setClassNames
     };
+}
+
+/**
+ * Global class rename logic.
+ * Finds all files with label_data and updates the class name.
+ */
+async function renameClass(oldName, newName, classNames, setClassNames) {
+    if (oldName === newName) return;
+
+    // 1. Update classNames array
+    const newClassNames = classNames.map(c => c === oldName ? newName : c);
+    setClassNames(newClassNames);
+    await saveSetting('classNames', newClassNames);
+
+    // 2. Find records in Dexie that might contain this class
+    // We update ALL records that have label_data because we want to ensure consistency
+    const records = await db.files.where('label_data').notEqual(null).toArray();
+
+    const oldIdx = classNames.indexOf(oldName);
+    if (oldIdx === -1) return; // Should not happen if UI is consistent
+
+    // 3. Batch update records
+    const updates = records.map(record => {
+        // Serialized YOLO format is: class_id x y w h
+        // Changing the name doesn't change the ID in YOLO logic usually, 
+        // BUT if we are renaming, we just update the metadata at the bottom: # classes: dog, cat
+        const lines = record.label_data.split('\n');
+        const updatedLines = lines.map(line => {
+            if (line.startsWith('# classes:')) {
+                return `# classes: ${newClassNames.join(', ')}`;
+            }
+            return line;
+        });
+
+        return {
+            id: record.id,
+            label_data: updatedLines.join('\n'),
+            status: FileStatus.PENDING // Mark for re-sync since metadata changed
+        };
+    });
+
+    await db.files.bulkPut(updates.map(u => ({
+        ...(records.find(r => r.id === u.id)),
+        ...u
+    })));
 }
 
 // Helper: Parse label data (YOLO format) to annotations array

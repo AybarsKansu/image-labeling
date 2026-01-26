@@ -1,168 +1,118 @@
-/**
- * FileExplorer Styles
- */
+/* FileExplorer Hierarchy Styles */
 
 .file-explorer {
     display: flex;
     flex-direction: column;
     height: 100%;
-    background: #1a1a2e;
+    background: #151528;
     color: #e0e0e0;
-    position: relative;
 }
 
 .explorer-header {
     padding: 12px 16px;
-    border-bottom: 1px solid #2a2a4a;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    border-bottom: 1px solid #2a2a4a;
 }
 
 .explorer-header h3 {
     margin: 0;
     font-size: 14px;
-    font-weight: 600;
     color: #fff;
+    font-weight: 600;
 }
 
 .file-count {
-    font-size: 12px;
+    font-size: 11px;
     color: #888;
+}
+
+.icon-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 18px;
+    padding: 4px;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.icon-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
 }
 
 .upload-buttons {
     display: flex;
     gap: 8px;
     padding: 8px 12px;
-    border-bottom: 1px solid #2a2a4a;
+    background: #1a1a2e;
 }
 
 .upload-btn {
     flex: 1;
-    padding: 8px 12px;
+    padding: 6px;
     background: #2a2a4a;
     border: 1px solid #3a3a5a;
-    border-radius: 6px;
+    border-radius: 4px;
     color: #e0e0e0;
     font-size: 12px;
     cursor: pointer;
-    transition: all 0.2s;
 }
 
 .upload-btn:hover {
-    background: #3a3a5a;
-    border-color: #4a4a6a;
+    background: #35355a;
 }
 
-.processing-indicator,
-.sync-status {
-    padding: 8px 12px;
-    background: #252540;
-    border-bottom: 1px solid #2a2a4a;
-}
-
-.processing-text,
-.sync-text {
-    font-size: 11px;
-    color: #888;
-    margin-bottom: 4px;
-}
-
-.progress-bar {
-    height: 4px;
-    background: #2a2a4a;
-    border-radius: 2px;
-    overflow: hidden;
-}
-
-.progress-fill {
-    height: 100%;
-    border-radius: 2px;
-    transition: width 0.3s ease;
-}
-
-.progress-fill.processing {
-    background: linear-gradient(90deg, #6366f1, #8b5cf6);
-}
-
-.progress-fill.syncing {
-    background: linear-gradient(90deg, #10b981, #34d399);
-}
-
-.drag-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(99, 102, 241, 0.2);
-    border: 3px dashed #6366f1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-    border-radius: 8px;
-    margin: 4px;
-}
-
-.drag-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    color: #fff;
-    font-weight: 500;
-}
-
-.drag-icon {
-    font-size: 48px;
-}
-
+/* Tree Styles */
 .file-list-container {
     flex: 1;
+    background: #111122;
     overflow: hidden;
 }
 
-.empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    color: #666;
-    text-align: center;
-    padding: 20px;
-}
-
-.empty-icon {
-    font-size: 48px;
-    margin-bottom: 12px;
-    opacity: 0.5;
-}
-
-.empty-state p {
-    margin: 4px 0;
-}
-
-.empty-hint {
-    font-size: 12px;
-    color: #555;
-}
-
-/* File Row */
-.file-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
+.folder-row {
     padding: 8px 12px;
+    background: #1a1a2e;
+    border-bottom: 1px solid #2a2a4a;
     cursor: pointer;
-    border-bottom: 1px solid #252540;
-    transition: background 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #a0aec0;
+}
+
+.folder-icon {
+    font-size: 10px;
+    width: 12px;
+}
+
+.folder-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.item-count {
+    font-size: 11px;
+    color: #666;
+}
+
+.file-row {
+    height: 60px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px 0 24px;
+    border-bottom: 1px solid #1a1a2e;
+    cursor: pointer;
+    transition: background 0.2s;
 }
 
 .file-row:hover {
-    background: #252540;
+    background: #1a1a3a;
 }
 
 .file-row.active {
@@ -171,15 +121,15 @@
 }
 
 .file-thumbnail {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
+    background: #252540;
     border-radius: 4px;
     overflow: hidden;
-    background: #2a2a4a;
-    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
 }
 
 .file-thumbnail img {
@@ -188,37 +138,95 @@
     object-fit: cover;
 }
 
-.placeholder-thumb {
-    font-size: 20px;
-    opacity: 0.5;
-}
-
 .file-info {
+    margin-left: 12px;
     flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+    overflow: hidden;
 }
 
 .file-name {
     font-size: 13px;
-    color: #e0e0e0;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    color: #cbd5e0;
 }
 
 .file-meta {
     display: flex;
+    align-items: center;
     gap: 8px;
+    margin-top: 2px;
+}
+
+.label-indicator {
+    color: #10b981;
     font-size: 12px;
 }
 
-.status-icon {
-    opacity: 0.8;
+/* Status Bars */
+.processing-indicator,
+.sync-status {
+    padding: 6px 12px;
+    background: #1a1a2e;
+    border-bottom: 1px solid #2a2a4a;
 }
 
-.has-labels {
-    color: #10b981;
+.processing-text,
+.sync-text {
+    font-size: 10px;
+    color: #718096;
+    margin-bottom: 4px;
+}
+
+.progress-bar {
+    height: 4px;
+    background: #2d3748;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    transition: width 0.3s ease;
+}
+
+.progress-fill.processing {
+    background: #6366f1;
+}
+
+.progress-fill.syncing {
+    background: #10b981;
+}
+
+/* Footer */
+.explorer-footer {
+    padding: 12px;
+    background: #1a1a2e;
+    border-top: 1px solid #2a2a4a;
+}
+
+.save-all-btn {
+    width: 100%;
+    padding: 10px;
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    transition: transform 0.2s, opacity 0.2s;
+}
+
+.save-all-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+}
+
+.save-all-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #4a5568;
+    box-shadow: none;
 }

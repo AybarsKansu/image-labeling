@@ -43,7 +43,8 @@ const RightSidebar = ({
     annotations,
     filterText,
     setFilterText,
-    onSelectLabel
+    onSelectLabel,
+    onRenameLabel
 }) => {
     const [activeTab, setActiveTab] = useState('properties');
 
@@ -118,6 +119,7 @@ const RightSidebar = ({
                         filterText={filterText}
                         setFilterText={setFilterText}
                         onSelectLabel={onSelectLabel}
+                        onRenameLabel={onRenameLabel}
                     />
                 )}
             </div>

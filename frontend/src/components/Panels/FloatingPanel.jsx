@@ -4,27 +4,30 @@ import './Panels.css';
 
 /**
  * FloatingPanel Component
- * Draggable/resizable panel showing label statistics
+ * Draggable/resizable panel showing label statistics with Rename capabilities.
  */
 const FloatingPanel = ({
     annotations,
     filterText,
     setFilterText,
     onSelectLabel,
-    onToggle, // Callback for parent when docked
-    docked = false // Default to false for backward compatibility
+    onRenameLabel, // New prop for global rename
+    onToggle,
+    docked = false
 }) => {
-    // Panel position and size
     const [panelPos, setPanelPos] = useState({ x: 20, y: 80 });
     const [panelSize, setPanelSize] = useState({ width: 280, height: 200 });
     const [isDragging, setIsDragging] = useState(false);
     const [isResizing, setIsResizing] = useState(false);
     const [isCollapsed, setIsCollapsed] = useState(false);
 
+    // Editing State
+    const [editingLabel, setEditingLabel] = useState(null); // The label being renamed
+    const [newLabelValue, setNewLabelValue] = useState('');
+
     const dragOffset = useRef({ x: 0, y: 0 });
     const resizeStart = useRef({ x: 0, y: 0, width: 0, height: 0 });
 
-    // Calculate label statistics
     const labelStats = useMemo(() => {
         const stats = {};
         annotations.forEach(ann => {
@@ -34,16 +37,29 @@ const FloatingPanel = ({
         return Object.entries(stats).sort((a, b) => b[1] - a[1]);
     }, [annotations]);
 
-    // Handle drag and resize
-    useEffect(() => {
-        if (docked) return; // Disable all drag/resize logic when docked
+    const startEditing = (e, label) => {
+        e.stopPropagation();
+        setEditingLabel(label);
+        setNewLabelValue(label);
+    };
 
+    const submitRename = () => {
+        if (editingLabel && newLabelValue && editingLabel !== newLabelValue) {
+            onRenameLabel(editingLabel, newLabelValue);
+        }
+        setEditingLabel(null);
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Enter') submitRename();
+        if (e.key === 'Escape') setEditingLabel(null);
+    };
+
+    useEffect(() => {
+        if (docked) return;
         const handleMouseMove = (e) => {
             if (isDragging) {
-                setPanelPos({
-                    x: e.clientX - dragOffset.current.x,
-                    y: e.clientY - dragOffset.current.y
-                });
+                setPanelPos({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y });
             }
             if (isResizing) {
                 const newWidth = Math.max(200, resizeStart.current.width + (e.clientX - resizeStart.current.x));
@@ -51,17 +67,11 @@ const FloatingPanel = ({
                 setPanelSize({ width: newWidth, height: newHeight });
             }
         };
-
-        const handleMouseUp = () => {
-            setIsDragging(false);
-            setIsResizing(false);
-        };
-
+        const handleMouseUp = () => { setIsDragging(false); setIsResizing(false); };
         if (isDragging || isResizing) {
             window.addEventListener('mousemove', handleMouseMove);
             window.addEventListener('mouseup', handleMouseUp);
         }
-
         return () => {
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
@@ -70,22 +80,14 @@ const FloatingPanel = ({
 
     const handleDragStart = (e) => {
         if (docked) return;
-        dragOffset.current = {
-            x: e.clientX - panelPos.x,
-            y: e.clientY - panelPos.y
-        };
+        dragOffset.current = { x: e.clientX - panelPos.x, y: e.clientY - panelPos.y };
         setIsDragging(true);
     };
 
     const handleResizeStart = (e) => {
         if (docked) return;
         e.stopPropagation();
-        resizeStart.current = {
-            x: e.clientX,
-            y: e.clientY,
-            width: panelSize.width,
-            height: panelSize.height
-        };
+        resizeStart.current = { x: e.clientX, y: e.clientY, width: panelSize.width, height: panelSize.height };
         setIsResizing(true);
     };
 
@@ -99,38 +101,23 @@ const FloatingPanel = ({
                 height: isCollapsed ? 'auto' : panelSize.height
             }}
         >
-            {/* Header */}
-            <div
-                className="panel-header"
-                onMouseDown={handleDragStart}
-            >
-                <span className="panel-title">📊 Detected Labels</span>
+            <div className="panel-header" onMouseDown={handleDragStart}>
+                <span className="panel-title">🏷️ Project Labels</span>
             </div>
 
-            {/* Filter Input */}
             <div className="panel-filter">
                 <input
                     type="text"
-                    placeholder="Filter labels..."
+                    placeholder="Search labels..."
                     value={filterText}
                     onChange={(e) => setFilterText(e.target.value)}
                     className="filter-input"
                 />
-                {filterText && (
-                    <button
-                        className="clear-button"
-                        onClick={() => setFilterText("")}
-                        title="Clear"
-                    >
-                        ✕
-                    </button>
-                )}
             </div>
 
-            {/* Label List */}
             <div className="panel-content">
                 {labelStats.length === 0 ? (
-                    <p className="empty-message">No annotations yet</p>
+                    <p className="empty-message">No labels detected</p>
                 ) : (
                     labelStats.map(([label, count]) => (
                         <div
@@ -138,29 +125,42 @@ const FloatingPanel = ({
                             className="label-item"
                             onClick={() => onSelectLabel && onSelectLabel(label)}
                         >
-                            <div
-                                className="label-color"
-                                style={{ background: stringToColor(label) }}
-                            />
-                            <span className="label-name">{label}</span>
-                            <span className="label-count">{count}</span>
+                            <div className="label-color" style={{ background: stringToColor(label) }} />
+
+                            {editingLabel === label ? (
+                                <input
+                                    autoFocus
+                                    className="rename-input"
+                                    value={newLabelValue}
+                                    onChange={(e) => setNewLabelValue(e.target.value)}
+                                    onBlur={submitRename}
+                                    onKeyDown={handleKeyDown}
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                            ) : (
+                                <span className="label-name">{label}</span>
+                            )}
+
+                            <div className="label-actions">
+                                <span className="label-count">{count}</span>
+                                <button
+                                    className="edit-label-btn"
+                                    onClick={(e) => startEditing(e, label)}
+                                    title="Rename globally"
+                                >
+                                    ✏️
+                                </button>
+                            </div>
                         </div>
                     ))
                 )}
             </div>
 
-            {/* Total Count */}
             <div className="panel-footer">
-                Total: {annotations.length} shapes
+                Total: {annotations.length} instances
             </div>
 
-            {/* Resize Handle */}
-            {!docked && (
-                <div
-                    className="resize-handle"
-                    onMouseDown={handleResizeStart}
-                />
-            )}
+            {!docked && <div className="resize-handle" onMouseDown={handleResizeStart} />}
         </div>
     );
 };

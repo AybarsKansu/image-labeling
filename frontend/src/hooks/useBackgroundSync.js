@@ -2,10 +2,9 @@
  * useBackgroundSync Hook
  * 
  * Manages background file uploads with:
+ * - Sequential Queue with Concurrency Limit (max 2)
+ * - Mandatory Delay between batches (200ms)
  * - Priority queue (active file jumps to front)
- * - Throttled uploads (batch size configurable)
- * - Automatic blob purging after sync
- * - Flush mode for export preparation
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -14,8 +13,9 @@ import db, { FileStatus } from '../db/index';
 import { getPendingFiles, setFileSyncing, markFileSynced, markFileError, updateFile } from '../db/fileOperations';
 
 const API_BASE = 'http://localhost:8000/api';
-const BATCH_SIZE = 2;
-const POLL_INTERVAL = 3000; // 3 seconds
+const CONCURRENCY_LIMIT = 2;
+const BATCH_DELAY = 200; // ms
+const POLL_INTERVAL = 3000; // ms
 
 export function useBackgroundSync(activeFileId = null) {
     const [isUploading, setIsUploading] = useState(false);
@@ -32,15 +32,17 @@ export function useBackgroundSync(activeFileId = null) {
     }, [activeFileId]);
 
     /**
-     * Main sync loop - polls for pending files and uploads them.
+     * Controlled sync loop.
      */
     useEffect(() => {
+        let isStopped = false;
+
         const syncLoop = async () => {
-            if (isUploadingRef.current) return;
+            if (isStopped || isUploadingRef.current) return;
 
             try {
-                // Get pending files
-                let pending = await getPendingFiles(BATCH_SIZE * 2);
+                // Get pending files (batch size = concurrency * 5 to have a buffer)
+                let pending = await getPendingFiles(CONCURRENCY_LIMIT * 5);
 
                 if (pending.length === 0) {
                     setUploadProgress({ current: 0, total: 0 });
@@ -56,12 +58,22 @@ export function useBackgroundSync(activeFileId = null) {
                     }
                 }
 
-                // Take batch
-                const batch = pending.slice(0, BATCH_SIZE);
+                // Take batch based on concurrency limit
+                const batch = pending.slice(0, CONCURRENCY_LIMIT);
                 setUploadQueue(batch);
-                setUploadProgress({ current: 0, total: batch.length });
+
+                // For progress bar, we want to know how many are pending total
+                const totalPendingCount = await db.files.where('status').equals(FileStatus.PENDING).count();
+                const totalSyncedCount = await db.files.where('status').equals(FileStatus.SYNCED).count();
+                setUploadProgress({
+                    current: totalSyncedCount,
+                    total: totalPendingCount + totalSyncedCount
+                });
 
                 await uploadBatch(batch);
+
+                // Mandatory delay before next batch to avoid overwhelming backend
+                await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
 
             } catch (err) {
                 console.error('Sync loop error:', err);
@@ -69,77 +81,23 @@ export function useBackgroundSync(activeFileId = null) {
         };
 
         const interval = setInterval(syncLoop, POLL_INTERVAL);
-
-        // Run immediately on mount
         syncLoop();
 
-        return () => clearInterval(interval);
+        return () => {
+            isStopped = true;
+            clearInterval(interval);
+        };
     }, []);
 
     /**
-     * Upload a batch of files.
+     * Upload a batch using Promise.all for limited concurrency.
      */
     const uploadBatch = useCallback(async (batch) => {
         isUploadingRef.current = true;
         setIsUploading(true);
 
-        for (let i = 0; i < batch.length; i++) {
-            const file = batch[i];
-
-            try {
-                // Safety: Ensure both blob and pending status exist
-                if (!file.blob || file.status !== FileStatus.PENDING) {
-                    // Update status to reflecting reality if needed
-                    if (!file.blob) await markFileError(file.id, 'Missing blob data');
-                    continue;
-                }
-
-                // Mark as syncing
-                await setFileSyncing(file.id);
-                setUploadProgress(prev => ({ ...prev, current: i + 1 }));
-
-                // Prepare form data
-                const formData = new FormData();
-                formData.append('file', file.blob, file.name);
-                formData.append('file_id', file.id);
-
-                if (file.label_data) {
-                    formData.append('label_data', file.label_data);
-                }
-
-                // Upload
-                const response = await axios.post(`${API_BASE}/files/upload`, formData, {
-                    headers: { 'Content-Type': 'multipart/form-data' },
-                    timeout: 60000 // 60 seconds per file
-                });
-
-                if (response.data && response.data.url) {
-                    // Success: Mark synced and purge blob
-                    await markFileSynced(file.id, response.data.url);
-                } else {
-                    throw new Error('Invalid response from server');
-                }
-
-            } catch (err) {
-                console.error(`Failed to upload ${file.name}:`, err);
-
-                // Retry logic: allow up to 3 retries
-                const currentRetries = (file.retry_count || 0) + 1;
-
-                if (currentRetries < 3) {
-                    // Put back to pending for retry
-                    await updateFile(file.id, {
-                        status: FileStatus.PENDING,
-                        retry_count: currentRetries,
-                        error: `Retry ${currentRetries}/3: ${err.message}`
-                    });
-                } else {
-                    // Final error
-                    await markFileError(file.id, `Upload failed after 3 attempts: ${err.message}`);
-                    await updateFile(file.id, { retry_count: currentRetries });
-                }
-            }
-        }
+        // Upload batch items in parallel (up to concurrency limit)
+        await Promise.all(batch.map(file => uploadSingleFile(file)));
 
         isUploadingRef.current = false;
         setIsUploading(false);
@@ -147,27 +105,79 @@ export function useBackgroundSync(activeFileId = null) {
     }, []);
 
     /**
+     * Handle single file upload logic.
+     */
+    const uploadSingleFile = async (file) => {
+        try {
+            // Safety: Ensure both blob and pending status exist
+            if (!file.blob || file.status !== FileStatus.PENDING) {
+                if (!file.blob) await markFileError(file.id, 'Missing blob data');
+                return;
+            }
+
+            // Mark as syncing
+            await setFileSyncing(file.id);
+
+            // Prepare form data
+            const formData = new FormData();
+            formData.append('file', file.blob, file.name);
+            formData.append('file_id', file.id);
+
+            if (file.label_data) {
+                formData.append('label_data', file.label_data);
+            }
+
+            // Upload
+            const response = await axios.post(`${API_BASE}/files/upload`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+                timeout: 60000 // 60 seconds per file
+            });
+
+            if (response.data && response.data.url) {
+                // Success: Mark synced and purge blob
+                await markFileSynced(file.id, response.data.url);
+            } else {
+                throw new Error('Invalid response from server');
+            }
+
+        } catch (err) {
+            console.error(`Failed to upload ${file.name}:`, err);
+
+            // Retry logic: allow up to 3 retries
+            const currentRetries = (file.retry_count || 0) + 1;
+
+            if (currentRetries < 3) {
+                await updateFile(file.id, {
+                    status: FileStatus.PENDING,
+                    retry_count: currentRetries,
+                    error: `Retry ${currentRetries}/3: ${err.message}`
+                });
+            } else {
+                await markFileError(file.id, `Upload failed after 3 attempts: ${err.message}`);
+                await updateFile(file.id, { retry_count: currentRetries });
+            }
+        }
+    };
+
+    /**
      * Force flush: Upload all pending files immediately.
-     * Used before export to ensure server has all data.
      */
     const flushPending = useCallback(async () => {
         setIsFlushing(true);
 
         try {
-            let pending = await getPendingFiles(1000); // Get all pending
+            let pending = await getPendingFiles(2000);
 
             if (pending.length === 0) {
                 setIsFlushing(false);
                 return { success: true, count: 0 };
             }
 
-            setUploadProgress({ current: 0, total: pending.length });
-
-            // Upload in batches
-            for (let i = 0; i < pending.length; i += BATCH_SIZE) {
-                const batch = pending.slice(i, i + BATCH_SIZE);
+            // Process in sequential chunks
+            for (let i = 0; i < pending.length; i += CONCURRENCY_LIMIT) {
+                const batch = pending.slice(i, i + CONCURRENCY_LIMIT);
                 await uploadBatch(batch);
-                setUploadProgress(prev => ({ ...prev, current: Math.min(i + BATCH_SIZE, pending.length) }));
+                await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
             }
 
             setIsFlushing(false);
@@ -180,31 +190,25 @@ export function useBackgroundSync(activeFileId = null) {
     }, [uploadBatch]);
 
     /**
-     * Prioritize a specific file (move to front of queue).
+     * Prioritize a specific file.
      */
     const prioritizeFile = useCallback(async (fileId) => {
-        // This is handled automatically via activeFileIdRef in the sync loop
-        // But we can also trigger an immediate sync if needed
         const file = await db.files.get(fileId);
-
         if (file && file.status === FileStatus.PENDING && file.blob) {
-            await uploadBatch([file]);
+            await uploadSingleFile(file);
         }
-    }, [uploadBatch]);
+    }, []);
 
     /**
      * Retry failed uploads.
      */
     const retryFailed = useCallback(async () => {
         const failed = await db.files.where('status').equals(FileStatus.ERROR).toArray();
-
         if (failed.length === 0) return;
 
-        // Reset to pending
         await Promise.all(failed.map(f =>
-            updateFile(f.id, { status: FileStatus.PENDING, error: null })
+            updateFile(f.id, { status: FileStatus.PENDING, error: null, retry_count: 0 })
         ));
-
     }, []);
 
     return {
@@ -212,7 +216,6 @@ export function useBackgroundSync(activeFileId = null) {
         isFlushing,
         uploadQueue,
         uploadProgress,
-
         flushPending,
         prioritizeFile,
         retryFailed

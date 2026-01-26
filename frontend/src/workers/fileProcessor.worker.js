@@ -89,6 +89,7 @@ async function processFiles(files) {
         processedImages.push({
             name: img.file.name,
             baseName: img.baseName,
+            path: img.file.webkitRelativePath || '',
             type: 'image',
             blob: img.file,
             thumbnail: thumbnail,
@@ -117,6 +118,7 @@ async function processFiles(files) {
         processedLabels.push({
             name: label.file.name,
             baseName: label.baseName,
+            path: label.file.webkitRelativePath || '',
             type: 'label',
             data: labelText
         });
