@@ -148,11 +148,11 @@ const MainToolbar = ({
     };
 
     // Reusable button styles
-    const btnBase = "flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-[var(--color-txt-main)] h-10 transition-all duration-200";
-    const btnDefault = "hover:bg-[var(--color-bg-tertiary)] hover:border-[var(--color-accent)]";
-    const btnAccent = "bg-indigo-600 text-white border-transparent hover:bg-indigo-500 ring-1 ring-white/10";
-    const btnDanger = "bg-red-600/20 text-red-400 border-red-900/30 hover:bg-red-600/40 hover:text-red-300";
-    const btnDisabled = "opacity-50 cursor-not-allowed border-transparent";
+    const btnBase = "flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 h-10";
+    const btnDefault = "bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white";
+    const btnAccent = "bg-indigo-600 text-white hover:bg-indigo-500";
+    const btnDanger = "bg-red-600/20 text-red-400 hover:bg-red-600/40 hover:text-red-300";
+    const btnDisabled = "opacity-50 cursor-not-allowed";
 
     return (
         <div className="flex items-center gap-4 px-4 py-3 bg-secondary border-b border-border min-h-[72px]">

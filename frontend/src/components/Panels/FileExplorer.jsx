@@ -242,7 +242,7 @@ const FileExplorer = ({
                         "flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed cursor-pointer transition-all",
                         isImageDragActive
                             ? "border-accent bg-accent/10"
-                            : "border-[var(--color-border)] hover:border-accent/50 hover:bg-tertiary"
+                            : "border-border hover:border-accent/50 hover:bg-tertiary"
                     )}
                     {...getImageRootProps()}
                     onClick={() => fileInputRef.current?.click()}
@@ -259,7 +259,7 @@ const FileExplorer = ({
                         "flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed cursor-pointer transition-all",
                         isLabelDragActive
                             ? "border-green-500 bg-green-500/10"
-                            : "border-[var(--color-border)] hover:border-green-500/50 hover:bg-tertiary"
+                            : "border-border hover:border-green-500/50 hover:bg-tertiary"
                     )}
                     {...getLabelRootProps()}
                     onClick={() => labelInputRef.current?.click()}

@@ -535,12 +535,7 @@ function App() {
         )}
 
         <div
-          className="flex-1 min-w-0 relative bg-[var(--color-bg-secondary)] overflow-hidden"
-          style={{
-            backgroundImage: 'radial-gradient(var(--color-border) 1px, transparent 1px)',
-            backgroundSize: '20px 20px',
-            opacity: 1 // Ensure container is visible
-          }}
+          className="flex-1 min-w-0 relative bg-primary overflow-hidden"
           ref={canvasContainerRef}
           onContextMenu={(e) => e.preventDefault()}
         >
