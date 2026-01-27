@@ -66,17 +66,10 @@ async function processFiles(files) {
         }
     }
 
-    // Extract class names
-    let classNames = [];
-    if (classesContent) {
-        classNames = parseClassesFile(classesContent);
-    }
-
     // Process images: generate thumbnails
     const processedImages = [];
     for (let i = 0; i < images.length; i++) {
         const img = images[i];
-        // Extract dimensions and generate thumbnail
         let thumbnail = null;
         let width = 0;
         let height = 0;
@@ -101,7 +94,6 @@ async function processFiles(files) {
             height
         });
 
-        // Report progress
         self.postMessage({
             type: 'PROCESS_PROGRESS',
             payload: { processed: i + 1, total: images.length + labels.length }
@@ -113,21 +105,17 @@ async function processFiles(files) {
     for (let i = 0; i < labels.length; i++) {
         const label = labels[i];
         const labelText = await readFileAsText(label.file);
-
-        if (classNames.length === 0) {
-            const embeddedClasses = extractEmbeddedClasses(labelText);
-            if (embeddedClasses.length > 0) classNames = embeddedClasses;
-        }
+        const embedded = extractEmbeddedClasses(labelText);
 
         processedLabels.push({
             name: label.file.name,
             baseName: label.baseName,
             path: getPath(label.file),
             type: 'label',
-            data: labelText
+            data: labelText,
+            embeddedClasses: embedded
         });
 
-        // Report progress
         self.postMessage({
             type: 'PROCESS_PROGRESS',
             payload: { processed: images.length + i + 1, total: images.length + labels.length }
@@ -137,23 +125,18 @@ async function processFiles(files) {
     return {
         images: processedImages,
         labels: processedLabels,
-        classNames: classNames
+        classNames: classesContent ? parseClassesFile(classesContent) : [],
+        isGlobalClasses: !!classesContent
     };
 }
 
 function getPath(file) {
-    // Check for custom path attached in main thread, or standard props
-    // _customPath is our manual override. path is from react-dropzone. webkitRelativePath is standard.
     let p = file._customPath || file.path || file.webkitRelativePath || '';
     if (typeof p === 'string' && p.startsWith('/')) p = p.substring(1);
     return p;
 }
 
-/**
- * Generate a thumbnail from an ImageBitmap.
- */
 async function generateThumbnailFromBitmap(imageBitmap, maxSize = 100) {
-    // Calculate dimensions
     const { width, height } = imageBitmap;
     let newWidth, newHeight;
 
@@ -165,24 +148,17 @@ async function generateThumbnailFromBitmap(imageBitmap, maxSize = 100) {
         newWidth = Math.round((width / height) * maxSize);
     }
 
-    // Use OffscreenCanvas for off-main-thread rendering
     const canvas = new OffscreenCanvas(newWidth, newHeight);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(imageBitmap, 0, 0, newWidth, newHeight);
 
-    // Convert to blob
     const thumbnailBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
-
-    // Convert to base64 for easy storage and display
     const arrayBuffer = await thumbnailBlob.arrayBuffer();
     const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
 
     return `data:image/jpeg;base64,${base64}`;
 }
 
-/**
- * Read file as text.
- */
 function readFileAsText(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -192,10 +168,6 @@ function readFileAsText(file) {
     });
 }
 
-/**
- * Parse classes.txt content.
- * Each line is a class name.
- */
 function parseClassesFile(content) {
     return content
         .split('\n')
@@ -203,19 +175,13 @@ function parseClassesFile(content) {
         .filter(line => line.length > 0 && !line.startsWith('#'));
 }
 
-/**
- * Extract embedded class names from label file.
- * Looks for: # classes: dog, cat, car
- */
 function extractEmbeddedClasses(labelText) {
     const lines = labelText.split('\n');
-
     for (const line of lines) {
         const match = line.match(/^#\s*classes?:\s*(.+)$/i);
         if (match) {
             return match[1].split(',').map(c => c.trim()).filter(c => c);
         }
     }
-
     return [];
 }

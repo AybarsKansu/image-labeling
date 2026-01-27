@@ -151,11 +151,13 @@ export function useFileSystem() {
                 setProcessingProgress({ processed: processedItems, total: totalToProcess, phase: 'saving' });
             }
 
-            // Save class names
-            if (result.classNames.length > 0) {
+            /* Keeping global classNames state unchanged as per request to focus on individual annotations */
+            /* 
+            if (result.classNames.length > 0 && result.isGlobalClasses) {
                 setClassNames(result.classNames);
                 await saveSetting('classNames', result.classNames);
             }
+            */
 
             setIsProcessing(false);
             setProcessingProgress({ processed: 0, total: 0 });
@@ -174,25 +176,16 @@ export function useFileSystem() {
         try {
             setIsProcessing(true);
 
-            // 1. Call Backend to clear session
-            try {
-                const axios = (await import('axios')).default;
-                await axios.delete('/api/files/clear-session');
-            } catch (err) {
-                console.warn('Backend clear failed (session might already be empty):', err);
-            }
-
-            // 2. Revoke all blob URLs to prevent memory leaks
+            // 1. Revoke all blob URLs to prevent memory leaks
             const allFiles = await db.files.toArray();
             allFiles.forEach(f => {
                 if (f.blobUrl) URL.revokeObjectURL(f.blobUrl);
             });
 
-            // 3. Clear IndexedDB
+            // 2. Clear IndexedDB
             await db.files.clear();
-            await db.labels.clear();
 
-            // 4. Reset state
+            // 3. Reset state
             setActiveFileId(null);
             setActiveFileData(null);
             setIsProcessing(false);
@@ -234,6 +227,7 @@ export function useFileSystem() {
 
         // Helper to extract path
         const getFilePath = (file) => {
+            // Prioritize webkitRelativePath for folder uploads
             let p = file.webkitRelativePath || file.path || file.name;
             if (typeof p === 'string' && p.startsWith('/')) p = p.substring(1);
             return p;
@@ -443,17 +437,7 @@ export function useFileSystem() {
         const file = await db.files.get(fileId);
         if (!file) return;
 
-        // 1. If synced, consider background delete (optional requirement based on user request)
-        if (file.status === FileStatus.SYNCED && file.backend_url) {
-            try {
-                const axios = (await import('axios')).default;
-                await axios.delete(`/api/files/delete/${fileId}`);
-            } catch (err) {
-                console.warn('Backend delete failed:', err);
-            }
-        }
-
-        // 2. Local delete
+        // Local delete only
         await deleteFile(fileId);
 
         if (fileId === activeFileId) {
@@ -617,6 +601,13 @@ function parseLabelData(labelData, classNames, imgWidth = 0, imgHeight = 0) {
     // Ensure string
     const dataStr = typeof labelData === 'string' ? labelData : JSON.stringify(labelData);
 
+    // 1. Strictly use embedded classes found in THIS specific file string
+    let localClassNames = [];
+    const embeddedMatch = dataStr.match(/^#\s*classes?:\s*(.+)$/im);
+    if (embeddedMatch) {
+        localClassNames = embeddedMatch[1].split(',').map(c => c.trim()).filter(c => c);
+    }
+
     const lines = dataStr.trim().split('\n').filter(l => !l.startsWith('#') && l.trim());
 
     return lines.map((line, idx) => {
@@ -624,7 +615,9 @@ function parseLabelData(labelData, classNames, imgWidth = 0, imgHeight = 0) {
         if (parts.length < 5) return null;
 
         const classId = parseInt(parts[0]);
-        const className = classNames[classId] || `Class ${classId}`;
+        // 2. Fallback: use 'class_n' if local list doesn't have the index. 
+        // Global state is ignored as requested.
+        const className = localClassNames[classId] || `class_${classId}`;
 
         // YOLO format: class_id x_center y_center width height [...polygon points]
         if (parts.length === 5) {

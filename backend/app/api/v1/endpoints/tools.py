@@ -80,33 +80,57 @@ async def edit_polygon_boolean(
 
 
 @router.post("/save")
-async def save_entry(
+async def save_data(
     file: UploadFile = File(...),
-    annotations: str = Form(...),  # TOON JSON string
-    augment: str = Form("false"),
+    annotations: str = Form(...),
+    image_name: str = Form(None),
+    augmentation: str = Form("false"),
+    augment: str = Form(None), # Backward compatibility
     dataset_service = Depends(get_dataset_service)
 ):
     """
-    Saves image and TOON annotations to server disk with augmentation.
+    Saves an image with its annotations.
+    Supports both standard annotation lists and TOON format.
     """
     try:
-        toon_data = json.loads(annotations)
+        data = json.loads(annotations)
         image_bytes = await file.read()
         img = decode_image(image_bytes)
         
-        do_augment = augment.lower() == "true"
+        # Determine augmentation flag (check both names)
+        aug_val = augment if augment is not None else augmentation
+        do_augment = aug_val.lower() == "true"
         
-        name_base = dataset_service.save_entry(
-            img=img,
-            toon_data=toon_data,
-            augment=do_augment
-        )
+        # Detect Format: 
+        # Standard: [{"label": "...", "points": [...]}, ...]
+        # TOON: {"v": "1.0", "m": [...], "c": [...], "d": [...]}
         
-        msg = f"Saved {name_base}" + (" (+3 augments)" if do_augment else "")
-        return JSONResponse({"success": True, "message": msg})
+        if isinstance(data, list):
+            # Standard list format
+            name_base = dataset_service.save_annotation(
+                img=img,
+                annotations=data,
+                image_name=image_name,
+                augment=do_augment
+            )
+        elif isinstance(data, dict) and "v" in data and "d" in data:
+            # TOON format
+            name_base = dataset_service.save_entry(
+                img=img,
+                toon_data=data,
+                augment=do_augment
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported annotation format")
+        
+        aug_msg = " (+9 augmentations)" if do_augment else ""
+        return JSONResponse({
+            "success": True, 
+            "message": f"Saved {name_base}{aug_msg}"
+        })
         
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format")
     except Exception as e:
-        print(f"Error in /save-entry: {e}")
+        print(f"Error in /save: {e}")
         raise HTTPException(status_code=500, detail=str(e))

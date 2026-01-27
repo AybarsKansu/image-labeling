@@ -10,7 +10,7 @@ import { useDrawTools } from './hooks/useDrawTools';
 import { useAIModels } from './hooks/useAIModels';
 import { usePolygonModifiers } from './hooks/usePolygonModifiers';
 import { useFileSystem } from './hooks/useFileSystem';
-import { useBackgroundSync } from './hooks/useBackgroundSync';
+import { useExport } from './hooks/useExport';
 import { useFormatConverter } from './hooks/useFormatConverter';
 
 // Components
@@ -43,7 +43,7 @@ function App() {
   const drawTools = useDrawTools(stage, annotationsHook, textPrompt, aiModels.selectedModel, aiModels.currentParams);
   const polygonMods = usePolygonModifiers(annotationsHook, stage);
   const fileSystem = useFileSystem();
-  const backgroundSync = useBackgroundSync(fileSystem.activeFileId);
+  const { exportProject } = useExport();
   const formatConverter = useFormatConverter();
 
   // ============================================
@@ -69,7 +69,6 @@ function App() {
   // LOCAL STATE (UI-specific)
   // ============================================
   const [saveMessage, setSaveMessage] = useState(null);
-  const [enableAugmentation, setEnableAugmentation] = useState(false);
   const [trainEpochs, setTrainEpochs] = useState(100);
   const [trainBatchSize, setTrainBatchSize] = useState(16);
   const [trainBaseModel, setTrainBaseModel] = useState('yolov8m-seg.pt');
@@ -139,22 +138,20 @@ function App() {
 
   const handleExport = useCallback(async (format) => {
     try {
-      setSaveMessage({ type: 'info', text: `Exporting as ${format.toUpperCase()}...` });
-      await backgroundSync.flushPending();
+      setSaveMessage({ type: 'info', text: `Packaging ${format.toUpperCase()}...` });
 
-      const formData = new URLSearchParams();
-      formData.append('format', format);
-      const response = await axios.post(`${API_URL}/files/export`, formData);
+      const result = await exportProject(format);
 
-      if (response.data.download_url) {
-        window.open(response.data.download_url, '_blank');
+      if (result.success) {
+        setSaveMessage({ type: 'success', text: `Exported ${result.count} images!` });
+      } else {
+        setSaveMessage({ type: 'error', text: 'Export finished but nothing found.' });
       }
-      setSaveMessage({ type: 'success', text: 'Export ready!' });
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (err) {
       setSaveMessage({ type: 'error', text: 'Export failed: ' + err.message });
     }
-  }, [backgroundSync]);
+  }, [exportProject]);
 
   const handleMerge = useCallback(async (type) => {
     const selectedAnns = annotationsHook.selectedAnns;
@@ -245,13 +242,32 @@ function App() {
   // ============================================
   const handleProjectExport = useCallback((format) => {
     try {
+      setSaveMessage({ type: 'info', text: `Preparing ${format.toUpperCase()}...` });
+
       // Build images data from file system
       const imagesData = fileSystem.files.map(file => {
-        // Convert TOON label_data back to internal annotations if present
         let annotations = [];
-        if (file.label_data?.d) {
-          const toonAnns = AnnotationConverter.toonToInternal(file.label_data);
-          annotations = toonAnns.annotations || [];
+        if (file.label_data) {
+          try {
+            const dataStr = typeof file.label_data === 'string' ? file.label_data : JSON.stringify(file.label_data);
+            const detected = AnnotationConverter.detectFormat(dataStr);
+
+            if (detected === 'toon') {
+              const toonContent = typeof file.label_data === 'string' ? JSON.parse(file.label_data) : file.label_data;
+              const result = AnnotationConverter.toonToInternal(toonContent);
+              annotations = result.annotations || [];
+            } else if (detected === 'yolo') {
+              const coco = AnnotationConverter.yoloToCoco(dataStr, file.width || 800, file.height || 600);
+              const result = AnnotationConverter.cocoToInternal(coco);
+              annotations = result.annotations || [];
+            } else if (detected === 'coco') {
+              const coco = JSON.parse(dataStr);
+              const result = AnnotationConverter.cocoToInternal(coco);
+              annotations = result.annotations || [];
+            }
+          } catch (e) {
+            console.warn(`Failed to parse annotations for ${file.name}`, e);
+          }
         }
 
         return {
@@ -265,19 +281,20 @@ function App() {
       }).filter(item => item.annotations.length > 0);
 
       if (imagesData.length === 0) {
-        setSaveMessage({ type: 'error', text: 'No annotations to export' });
+        setSaveMessage({ type: 'error', text: 'No annotations found to export.' });
         return;
       }
 
       const result = formatConverter.downloadAnnotations(imagesData, format);
       if (result.success) {
         setSaveMessage({ type: 'success', text: `Exported ${result.filename}` });
-        setTimeout(() => setSaveMessage(null), 3000);
+        setShowExportModal(false);
       }
     } catch (err) {
       console.error('Export failed:', err);
       setSaveMessage({ type: 'error', text: 'Export failed: ' + err.message });
     }
+    setTimeout(() => setSaveMessage(null), 3000);
   }, [fileSystem.files, formatConverter]);
 
   // ============================================
@@ -294,7 +311,7 @@ function App() {
       const annotations = annotationsHook.annotations || [];
 
       if (annotations.length === 0) {
-        setSaveMessage({ type: 'error', text: 'No annotations to export' });
+        setSaveMessage({ type: 'error', text: 'No annotations to export2' });
         return;
       }
 
@@ -418,7 +435,11 @@ function App() {
   }, [stage]);
 
   return (
-    <div className="App">
+    <div
+      className="App"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => e.preventDefault()}
+    >
       <MainToolbar
         tool={drawTools.tool} setTool={drawTools.setTool}
         onUndo={annotationsHook.handleUndo} onRedo={annotationsHook.handleRedo}
@@ -448,9 +469,7 @@ function App() {
             onSelectFile={fileSystem.selectFile} onIngestFiles={fileSystem.ingestFiles}
             onClearAll={fileSystem.clearProject} onRetryFile={fileSystem.retryFile}
             onRemoveFile={fileSystem.removeFile}
-            onSaveAll={handleSaveAll} syncStats={fileSystem.syncStats}
-            isSyncEnabled={backgroundSync.isSyncEnabled}
-            onToggleSync={() => backgroundSync.setIsSyncEnabled(!backgroundSync.isSyncEnabled)}
+            onSaveAll={handleSaveAll}
             isProcessing={fileSystem.isProcessing} processingProgress={fileSystem.processingProgress}
             onExportProject={() => setShowExportModal(true)}
           />
@@ -520,7 +539,14 @@ function App() {
         onClose={() => setShowExportModal(false)}
         onExport={handleProjectExport}
         imageCount={fileSystem.files.length}
-        annotationCount={fileSystem.files.reduce((sum, f) => sum + (f.label_data?.d?.length || 0), 0)}
+        annotationCount={fileSystem.files.reduce((sum, f) => {
+          if (!f.label_data) return sum;
+          if (f.label_data.d) return sum + f.label_data.d.length;
+          if (typeof f.label_data === 'string') {
+            return sum + f.label_data.split('\n').filter(l => l.trim() && !l.startsWith('#')).length;
+          }
+          return sum;
+        }, 0)}
         mode="batch"
       />
     </div>

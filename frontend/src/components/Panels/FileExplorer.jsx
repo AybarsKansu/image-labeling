@@ -13,11 +13,7 @@ const FileExplorer = ({
     onRetryFile,
     onRemoveFile,
     onSaveAll,
-    onExportProject,    // NEW: Opens export modal
-    onImportLabels,     // NEW: Handler for importing label files
-    isSyncEnabled,
-    onToggleSync,
-    syncStats = { pending: 0, syncing: 0, synced: 0, total: 0 },
+    onExportProject,
     isProcessing = false,
     processingProgress = { processed: 0, total: 0 }
 }) => {
@@ -52,7 +48,6 @@ const FileExplorer = ({
             /\.(txt|xml|json)$/i.test(f.name)
         );
         if (labelFiles.length > 0 && onIngestFiles) {
-            // Pass all files to the unified ingestion handler
             onIngestFiles(labelFiles);
         }
     }, [onIngestFiles]);
@@ -70,14 +65,14 @@ const FileExplorer = ({
         },
         noClick: true,
         noKeyboard: true,
-        multiple: true // Enable multiple files
+        multiple: true
     });
 
     const handleImageSelect = (e) => {
-        const selected = Array.from(e.target.files || []).filter(f =>
-            f.type.startsWith('image/')
-        );
-        if (selected.length > 0) onIngestFiles(selected);
+        const files = Array.from(e.target.files || []);
+        if (files.length > 0) {
+            onIngestFiles(files);
+        }
         e.target.value = '';
     };
 
@@ -100,32 +95,47 @@ const FileExplorer = ({
 
     // --- Hierarchical Processing ---
     const treeData = useMemo(() => {
+        if (files.length === 0) return [];
+
         const flatList = [];
         const folders = {};
 
         files.forEach(file => {
-            const parts = file.path ? file.path.split('/') : [];
-            const dirPath = parts.slice(0, -1).join('/') || 'Root';
+            const fullPath = file.path || file.name;
+            const parts = fullPath.split('/');
+
+            // Group by directory path
+            const dirPath = parts.length > 1 ? parts.slice(0, -1).join('/') : 'Root';
 
             if (!folders[dirPath]) folders[dirPath] = [];
             folders[dirPath].push(file);
         });
 
-        const sortedPaths = Object.keys(folders).sort();
+        // Sort folder paths alphabetically
+        const sortedPaths = Object.keys(folders).sort((a, b) => {
+            if (a === 'Root') return -1;
+            if (b === 'Root') return 1;
+            return a.localeCompare(b);
+        });
 
         sortedPaths.forEach(path => {
             const isCollapsed = collapsedFolders.has(path);
+            const isRoot = path === 'Root';
 
+            // Folder Header
             flatList.push({
                 type: 'folder',
                 path: path,
-                name: path === 'Root' ? '📂 project_root' : `📁 ${path}`,
+                name: isRoot ? '📂 /' : `📁 ${path}`,
                 count: folders[path].length,
                 isCollapsed
             });
 
+            // Files in folder
             if (!isCollapsed) {
-                folders[path].forEach(file => {
+                // Sort files in folder
+                const sortedFiles = [...folders[path]].sort((a, b) => a.name.localeCompare(b.name));
+                sortedFiles.forEach(file => {
                     flatList.push({
                         type: 'file',
                         data: file
@@ -137,16 +147,18 @@ const FileExplorer = ({
         return flatList;
     }, [files, collapsedFolders]);
 
-    // Calculate annotation count for export stats
     const annotationCount = useMemo(() => {
         return files.reduce((sum, file) => {
             const labelData = file.label_data;
             if (labelData?.d) return sum + labelData.d.length;
+
+            // Check embedded line count if 'd' structure not parsed yet (raw string)
+            if (typeof labelData === 'string') {
+                return sum + labelData.split('\n').filter(l => l.trim() && !l.startsWith('#')).length;
+            }
             return sum;
         }, 0);
     }, [files]);
-
-    const syncPercent = syncStats.total > 0 ? Math.round((syncStats.synced / syncStats.total) * 100) : 0;
 
     return (
         <div className="file-explorer">
@@ -157,13 +169,6 @@ const FileExplorer = ({
                     <div className="file-count">{files.length} images • {annotationCount} labels</div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <button
-                        className={`sync-toggle-btn ${isSyncEnabled ? 'active' : ''}`}
-                        onClick={onToggleSync}
-                        title={isSyncEnabled ? 'Cloud Sync Enabled' : 'Cloud Sync Disabled'}
-                    >
-                        {isSyncEnabled ? '☁️ ON' : '☁️ OFF'}
-                    </button>
                     <button
                         onClick={() => { if (window.confirm('Clear everything?')) onClearAll(); }}
                         className="icon-btn"
@@ -182,11 +187,33 @@ const FileExplorer = ({
                     onClick={() => fileInputRef.current?.click()}
                 >
                     <input {...getImageInputProps()} />
-                    <input ref={fileInputRef} type="file" multiple accept="image/*" onChange={handleImageSelect} style={{ display: 'none' }} />
-                    <input ref={folderInputRef} type="file" webkitdirectory="" directory="" multiple onChange={handleImageSelect} style={{ display: 'none' }} />
+                    {/* Standard File Input */}
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        onChange={handleImageSelect}
+                        style={{ display: 'none' }}
+                    />
+                    {/* Directory Input */}
+                    <input
+                        ref={folderInputRef}
+                        type="file"
+                        webkitdirectory=""
+                        directory=""
+                        multiple
+                        onChange={handleImageSelect}
+                        style={{ display: 'none' }}
+                    />
+
                     <span className="upload-icon">🖼️</span>
                     <span className="upload-text">Add Images</span>
-                    <span className="upload-hint">Drop files or folders</span>
+                    <div className="upload-actions-row">
+                        <small onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>Select Files</small>
+                        <span className="divider">|</span>
+                        <small onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}>Select Folder</small>
+                    </div>
                 </div>
 
                 <div
@@ -202,23 +229,12 @@ const FileExplorer = ({
                 </div>
             </div>
 
-
-
             {/* Status Bars */}
             {isProcessing && (
                 <div className="processing-indicator">
                     <div className="processing-text">Ingesting... {processingProgress.processed}/{processingProgress.total}</div>
                     <div className="progress-bar">
                         <div className="progress-fill processing" style={{ width: `${(processingProgress.processed / processingProgress.total) * 100}%` }} />
-                    </div>
-                </div>
-            )}
-
-            {isSyncEnabled && syncStats.total > 0 && syncStats.pending > 0 && (
-                <div className="sync-status">
-                    <div className="sync-text">Syncing: {syncStats.synced}/{syncStats.total}</div>
-                    <div className="progress-bar">
-                        <div className="progress-fill syncing" style={{ width: `${syncPercent}%` }} />
                     </div>
                 </div>
             )}
@@ -256,7 +272,6 @@ const FileExplorer = ({
                             const isActive = file.id === activeFileId;
                             const statusIcon = getStatusIcon(file.status);
                             const hasError = file.status === FileStatus.ERROR;
-                            const isSynced = file.status === FileStatus.SYNCED;
 
                             return (
                                 <div
@@ -286,9 +301,7 @@ const FileExplorer = ({
                                             </button>
                                         </div>
                                         <div className="file-meta">
-                                            <span className="storage-status" title={isSynced ? 'Stored in Cloud' : 'Local Only'}>
-                                                {isSynced ? '🌐' : '💻'}
-                                            </span>
+                                            <span className="storage-status" title="Local Only">💻</span>
                                             <span
                                                 onClick={(e) => {
                                                     if (hasError) {
@@ -316,16 +329,15 @@ const FileExplorer = ({
                     className="export-btn"
                     onClick={onExportProject}
                     disabled={files.length === 0}
-                    title="Export project annotations"
                 >
-                    📤 Export Project
+                    📤 Export Dataset
                 </button>
                 <button
                     className="save-all-btn"
                     onClick={() => onSaveAll && onSaveAll()}
-                    disabled={files.length === 0 || syncStats.pending > 0}
+                    disabled={files.length === 0}
                 >
-                    🚀 Save All
+                    🚀 Save to Backend
                 </button>
             </div>
         </div>

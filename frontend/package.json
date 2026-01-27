@@ -89,6 +89,7 @@
     "json-schema-traverse": "^0.4.1",
     "json-stable-stringify-without-jsonify": "^1.0.1",
     "json5": "^2.2.3",
+    "jszip": "^3.10.1",
     "keyv": "^4.5.4",
     "konva": "^10.2.0",
     "levn": "^0.4.1",

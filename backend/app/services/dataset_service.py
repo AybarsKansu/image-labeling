@@ -39,16 +39,7 @@ class DatasetService:
         augment: bool = False
     ) -> str:
         """
-        Saves an image with its annotations.
-        
-        Args:
-            img: OpenCV image
-            annotations: List of annotation dicts with 'label' and 'points'
-            image_name: Optional filename
-            augment: Whether to create augmented copies
-            
-        Returns:
-            Base name of saved files
+        Saves an image with its annotations and optional augmentations.
         """
         # Determine filename
         if image_name:
@@ -58,36 +49,90 @@ class DatasetService:
             name_base = str(uuid.uuid4())
             ext = ".jpg"
         
-        # Save original
+        # 1. Save Original
         self._save_pair("", img, annotations, name_base, ext)
         
         if augment:
             img_h, img_w = img.shape[:2]
             
+            # --- Geometric Augmentations ---
+            
             # Horizontal flip
-            img_flip = cv2.flip(img, 1)
-            anns_flip = []
-            for a in annotations:
-                new_a = a.copy()
-                pts = a.get("points", [])
-                flipped_pts = []
-                for i in range(0, len(pts), 2):
-                    flipped_pts.append(img_w - pts[i])
-                    flipped_pts.append(pts[i+1])
-                new_a["points"] = flipped_pts
-                anns_flip.append(new_a)
-            self._save_pair("_flip", img_flip, anns_flip, name_base, ext)
+            img_hflip = cv2.flip(img, 1)
+            anns_hflip = self._transform_annotations(annotations, img_w, img_h, "hflip")
+            self._save_pair("_hflip", img_hflip, anns_hflip, name_base, ext)
+            
+            # Vertical flip
+            img_vflip = cv2.flip(img, 0)
+            anns_vflip = self._transform_annotations(annotations, img_w, img_h, "vflip")
+            self._save_pair("_vflip", img_vflip, anns_vflip, name_base, ext)
+            
+            # Rotation 90 degrees clockwise
+            img_r90 = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+            anns_r90 = self._transform_annotations(annotations, img_w, img_h, "r90")
+            self._save_pair("_r90", img_r90, anns_r90, name_base, ext)
+            
+            # Rotation 180 degrees
+            img_r180 = cv2.rotate(img, cv2.ROTATE_180)
+            anns_r180 = self._transform_annotations(annotations, img_w, img_h, "r180")
+            self._save_pair("_r180", img_r180, anns_r180, name_base, ext)
+            
+            # Rotation 270 degrees clockwise (90 counter-clockwise)
+            img_r270 = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            anns_r270 = self._transform_annotations(annotations, img_w, img_h, "r270")
+            self._save_pair("_r270", img_r270, anns_r270, name_base, ext)
+            
+            # --- Pixel Augmentations ---
+            
+            # Brightness increase
+            img_bright = cv2.convertScaleAbs(img, alpha=1.2, beta=30)
+            self._save_pair("_bright", img_bright, annotations, name_base, ext)
             
             # Brightness decrease
-            img_dark = cv2.convertScaleAbs(img, alpha=1.0, beta=-60)
+            img_dark = cv2.convertScaleAbs(img, alpha=0.8, beta=-30)
             self._save_pair("_dark", img_dark, annotations, name_base, ext)
             
+            # Gaussian blur
+            img_blur = cv2.GaussianBlur(img, (5, 5), 0)
+            self._save_pair("_blur", img_blur, annotations, name_base, ext)
+            
             # Gaussian noise
-            noise = np.random.normal(0, 25, img.shape)
+            noise = np.random.normal(0, 15, img.shape)
             img_noise = np.clip(img + noise, 0, 255).astype(np.uint8)
             self._save_pair("_noise", img_noise, annotations, name_base, ext)
         
         return name_base
+
+    def _transform_annotations(self, annotations: List[Dict[str, Any]], w: int, h: int, mode: str) -> List[Dict[str, Any]]:
+        """Helper to transform annotation coordinates based on augmentation mode."""
+        transformed = []
+        for a in annotations:
+            new_a = a.copy()
+            pts = a.get("points", [])
+            new_pts = []
+            
+            for i in range(0, len(pts), 2):
+                x, y = pts[i], pts[i+1]
+                
+                if mode == "hflip":
+                    new_pts.extend([w - x, y])
+                elif mode == "vflip":
+                    new_pts.extend([x, h - y])
+                elif mode == "r90":
+                    # (x, y) -> (h - y, x)
+                    new_pts.extend([h - y, x])
+                elif mode == "r180":
+                    # (x, y) -> (w - x, h - y)
+                    new_pts.extend([w - x, h - y])
+                elif mode == "r270":
+                    # (x, y) -> (y, w - x)
+                    new_pts.extend([y, w - x])
+                else:
+                    new_pts.extend([x, y])
+            
+            new_a["points"] = new_pts
+            transformed.append(new_a)
+        return transformed
 
     def save_entry(
         self,
@@ -97,12 +142,11 @@ class DatasetService:
     ) -> str:
         """
         Saves image and TOON annotations to dataset/images and dataset/labels.
-        Includes augmentation: flip, dark, noise.
         """
-        # Metadata
         meta = toon_data.get("m", ["unknown.jpg", 0, 0])
         original_name = Path(meta[0]).stem
         img_w = meta[1]
+        img_h = meta[2]
         
         base_name = original_name
         ext = ".jpg"
@@ -111,39 +155,51 @@ class DatasetService:
         self._save_toon_pair("", img, toon_data, base_name, ext)
         
         if augment:
-            # 2. Dark
-            img_dark = cv2.convertScaleAbs(img, alpha=1.0, beta=-50)
-            self._save_toon_pair("_dark", img_dark, toon_data, base_name, ext)
+            # Re-use geometric transforms via a helper or direct implementation
+            # For TOON, we need to transform the toon_data["d"] array
             
-            # 3. Noise
-            noise = np.random.normal(0, 25, img.shape)
-            img_noise = np.clip(img + noise, 0, 255).astype(np.uint8)
-            self._save_toon_pair("_noise", img_noise, toon_data, base_name, ext)
+            modes = {
+                "_hflip": (cv2.flip(img, 1), "hflip"),
+                "_vflip": (cv2.flip(img, 0), "vflip"),
+                "_r90": (cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE), "r90"),
+                "_r180": (cv2.rotate(img, cv2.ROTATE_180), "r180"),
+                "_r270": (cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE), "r270")
+            }
             
-            # 4. Flip
-            img_flip = cv2.flip(img, 1)
+            for suffix, (aug_img, mode) in modes.items():
+                aug_toon = toon_data.copy()
+                original_data = toon_data.get("d", [])
+                new_data = []
+                
+                for item in original_data:
+                    cat_idx, pts = item[0], item[1]
+                    new_pts = []
+                    for i in range(0, len(pts), 2):
+                        x, y = pts[i], pts[i+1]
+                        if mode == "hflip": new_pts.extend([img_w - x, y])
+                        elif mode == "vflip": new_pts.extend([x, img_h - y])
+                        elif mode == "r90": new_pts.extend([img_h - y, x])
+                        elif mode == "r180": new_pts.extend([img_w - x, img_h - y])
+                        elif mode == "r270": new_pts.extend([y, img_w - x])
+                    new_data.append([cat_idx, new_pts])
+                
+                aug_toon["d"] = new_data
+                # Update dimensions for rotations
+                if mode in ["r90", "r270"]:
+                    aug_toon["m"] = [aug_toon["m"][0], img_h, img_w]
+                
+                self._save_toon_pair(suffix, aug_img, aug_toon, base_name, ext)
             
-            # Flip TOON coordinates
-            toon_flip = toon_data.copy()
-            # Deep copy data array
-            original_data = toon_data.get("d", [])
-            new_data = []
+            # Pixel Augmentations (no coordinate change)
+            pixel_augs = {
+                "_bright": cv2.convertScaleAbs(img, alpha=1.2, beta=30),
+                "_dark": cv2.convertScaleAbs(img, alpha=0.8, beta=-30),
+                "_noise": np.clip(img + np.random.normal(0, 15, img.shape), 0, 255).astype(np.uint8),
+                "_blur": cv2.GaussianBlur(img, (5, 5), 0)
+            }
             
-            for item in original_data:
-                # item is [cat_idx, [pts]]
-                cat_idx = item[0]
-                pts = item[1]
-                flipped_pts = []
-                for i in range(0, len(pts), 2):
-                    x = pts[i]
-                    y = pts[i+1]
-                    flipped_pts.append(img_w - x) # Flip X
-                    flipped_pts.append(y)         # Keep Y
-                new_data.append([cat_idx, flipped_pts])
-            
-            toon_flip["d"] = new_data
-            
-            self._save_toon_pair("_flip", img_flip, toon_flip, base_name, ext)
+            for suffix, aug_img in pixel_augs.items():
+                self._save_toon_pair(suffix, aug_img, toon_data, base_name, ext)
             
         return base_name
 

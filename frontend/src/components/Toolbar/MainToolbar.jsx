@@ -30,13 +30,8 @@ const MainToolbar = ({
 
     // ... (rest of props)
 
-    // Augmentation
-    enableAugmentation,
-    setEnableAugmentation,
-
     // Actions
     onDetectAll,
-    onSave,
     onUndo,
     onRedo,
     onClearAll,
@@ -370,18 +365,8 @@ const MainToolbar = ({
 
             <div className="toolbar-divider" />
 
-            {/* Save & Export Section */}
+            {/* Export Section */}
             <div className="toolbar-section">
-                {/* Save Project (TOON) */}
-                <button
-                    className="toolbar-btn success"
-                    onClick={onSave}
-                    disabled={!imageFile}
-                    title="Save project as TOON format (local download)"
-                >
-                    💾 Save Project
-                </button>
-
                 {/* Export Dropdown */}
                 <div className="export-dropdown-wrapper" ref={exportDropdownRef}>
                     <button
@@ -407,19 +392,6 @@ const MainToolbar = ({
                     </div>
                 </div>
 
-                {/* Augmentation Toggle */}
-                <button
-                    className={`toolbar-btn ${enableAugmentation ? 'active-toggle' : ''}`}
-                    onClick={() => setEnableAugmentation(!enableAugmentation)}
-                    title="Toggle Augmentation"
-                    style={{
-                        opacity: enableAugmentation ? 1 : 0.6,
-                        border: enableAugmentation ? '1px solid #10b981' : '1px solid transparent'
-                    }}
-                >
-                    Data Augmentation
-                </button>
-
                 <button
                     className="toolbar-btn"
                     onClick={onOpenTrainModal}
@@ -427,8 +399,6 @@ const MainToolbar = ({
                 >
                     Train Model
                 </button>
-
-
             </div>
 
             {/* Save Message */}

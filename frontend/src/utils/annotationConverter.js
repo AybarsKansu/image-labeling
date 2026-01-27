@@ -110,7 +110,6 @@ class AnnotationConverter {
         }));
 
         const categories = Array.from(categoryIdToName.values());
-
         return { annotations, categories };
     }
 
@@ -517,6 +516,7 @@ ${objectElements.join('\n')}
      */
     static toonToInternal(toonData) {
         const coco = this.toonToCoco(toonData);
+        console.log(coco);
         return this.cocoToInternal(coco);
     }
 
