@@ -23,6 +23,91 @@ class AnnotationConverter {
     // ============================================
 
     /**
+     * Universal Parser Dispatcher
+     * @param {string|Object} content - File content
+     * @param {Array} projectImages - Project images metadata
+     * @param {string} format - Optional format override
+     */
+    static parseAnnotations(content, projectImages = [], format = null) {
+        let rawContent = content;
+        let parsedJson = null;
+
+        if (typeof content === 'object' && content !== null) {
+            parsedJson = content;
+            rawContent = JSON.stringify(content);
+        }
+
+        const detectedFormat = format || this.detectFormat(rawContent);
+        console.log(`[AnnotationConverter] Parsing as: ${detectedFormat}`);
+
+        try {
+            switch (detectedFormat) {
+                case 'coco':
+                    const cocoData = parsedJson || JSON.parse(rawContent);
+                    return this.parseBatchCoco(cocoData, projectImages);
+
+                case 'toon':
+                    // Single-image TOON
+                    const toonData = parsedJson || JSON.parse(rawContent);
+                    const toonResult = this.toonToInternal(toonData);
+                    const toonFileName = toonData.m?.[0] || 'image.jpg';
+                    return {
+                        annotations: { [toonFileName]: toonResult.annotations },
+                        categories: toonResult.categories,
+                        orphans: []
+                    };
+
+                case 'toon-batch':
+                    const batchToonData = parsedJson || JSON.parse(rawContent);
+                    return this.parseBatchToon(batchToonData, projectImages);
+
+                case 'voc':
+                    // Single VOC XML
+                    const vocResult = this.vocToCoco(rawContent);
+                    const vocFileName = vocResult.images?.[0]?.file_name || 'image.jpg';
+                    const vocInternal = this.cocoToInternal(vocResult);
+                    return {
+                        annotations: { [vocFileName]: vocInternal.annotations },
+                        categories: vocInternal.categories,
+                        orphans: []
+                    };
+
+                case 'voc-aggregated':
+                    return this.parseAggregatedVoc(rawContent, projectImages);
+
+                case 'yolo':
+                    // Standard single YOLO -> needs context.
+                    // We assume it belongs to the *first* project image provided (usually only 1 if single import)
+                    if (projectImages.length === 0) {
+                        // Fallback structure if no context
+                        throw new Error('Single YOLO file requires image context.');
+                    }
+                    const firstImage = projectImages[0];
+                    const yoloCoco = this.yoloToCoco(
+                        rawContent,
+                        firstImage.width || 1,
+                        firstImage.height || 1
+                    );
+                    const yoloInternal = this.cocoToInternal(yoloCoco);
+                    return {
+                        annotations: { [firstImage.name]: yoloInternal.annotations },
+                        categories: yoloInternal.categories,
+                        orphans: []
+                    };
+
+                case 'yolo-aggregated':
+                    return this.parseAggregatedYolo(rawContent, projectImages);
+
+                default:
+                    throw new Error(`Unknown or unsupported format: ${detectedFormat}`);
+            }
+        } catch (error) {
+            console.error('[AnnotationConverter] Parse error:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Convert internal annotation state to COCO format
      * @param {Array} annotations - Array of {id, label, points, type}
      * @param {Object} imageInfo - {name, width, height}
@@ -516,7 +601,6 @@ ${objectElements.join('\n')}
      */
     static toonToInternal(toonData) {
         const coco = this.toonToCoco(toonData);
-        console.log(coco);
         return this.cocoToInternal(coco);
     }
 
@@ -548,8 +632,7 @@ ${objectElements.join('\n')}
             try {
                 const json = JSON.parse(trimmed);
                 // TOON format check
-                if (json.v && json.d && json.c) {
-                    // Check if multi-image TOON
+                if (json.v && json.c && (json.d || json.images)) {
                     if (Array.isArray(json.images)) return 'toon-batch';
                     return 'toon';
                 }
@@ -570,16 +653,20 @@ ${objectElements.join('\n')}
             const parts = firstLine.split(/\s+/);
             const firstToken = parts[0];
 
-            // Standard YOLO: starts with class_id (integer)
-            // e.g. "0 0.5 0.5 0.2 0.2"
-            if (!isNaN(parseInt(firstToken)) && String(parseInt(firstToken)) === firstToken && parts.length >= 5) {
-                return 'yolo';
+            // 1. REFINED Aggregated YOLO detection:
+            // Check if any token in the line looks like an image filename (.jpg, .jpeg, .png, etc.)
+            // AND the line ends with a sequence of at least 4 numbers (bbox or poly)
+            const hasImageExt = parts.some(p => /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(p));
+            const endsWithNumbers = parts.slice(-4).every(p => /^-?\d*\.?\d+(?:[eE][-+]?\d+)?$/.test(p));
+
+            if (hasImageExt && endsWithNumbers) {
+                return 'yolo-aggregated';
             }
 
-            // Aggregated YOLO: first part contains path separator (/) or file extension, IS NOT a pure number
-            // e.g. "image.jpg 0 0.1 0.1..." or "data/img.png 1 ..."
-            if (isNaN(parseInt(firstToken)) && (firstToken.includes('/') || firstToken.includes('.'))) {
-                return 'yolo-aggregated';
+            // 2. Standard YOLO detection:
+            // Starts with an integer (class_id) and has at least 5 parts total
+            if (!isNaN(parseInt(firstToken)) && String(parseInt(firstToken)) === firstToken && parts.length >= 5) {
+                return 'yolo';
             }
         }
 
@@ -607,11 +694,19 @@ ${objectElements.join('\n')}
         const orphans = [];
         let classNames = [];
 
-        // Build image lookup by name
+        // Build image lookup: exact match AND filename-only match
         const imageMap = new Map();
+        const baseNameMap = new Map(); // Helper for path-less matching
+
         projectImages.forEach(img => {
-            const name = img.name || img.file_name;
-            imageMap.set(name, { width: img.width || 1, height: img.height || 1 });
+            // PREFER PATH (Folder structure) as the unique identifier
+            const fullName = img.path || img.name || img.file_name;
+            const size = { width: img.width || 1, height: img.height || 1 };
+            imageMap.set(fullName, size);
+
+            // Map the basename (img.jpg) to the full project path (Folder/img.jpg)
+            const base = (img.name || fullName).split('/').pop();
+            baseNameMap.set(base, fullName);
         });
 
         // Extract class names from metadata comment
@@ -620,32 +715,62 @@ ${objectElements.join('\n')}
             classNames = metadataLine.replace('# classes:', '').trim().split(',').map(c => c.trim());
         }
 
-        // Parse annotation lines
-        lines.filter(l => l.trim() && !l.startsWith('#')).forEach(line => {
-            const parts = line.trim().split(/\s+/);
-            if (parts.length < 6) return; // Need at least: path class_id x y w h
+        console.log(`[AnnotationConverter] Matching against ${projectImages.length} project images...`);
 
-            // Extract image path/name from first part
-            const imagePath = parts[0];
-            const imageName = imagePath.split('/').pop(); // Get filename from path
-            const classId = parseInt(parts[1]);
-            const coords = parts.slice(2).map(parseFloat);
+        // Parse annotation lines
+        lines.filter(l => l.trim() && !l.startsWith('#')).forEach((line, lineIdx) => {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length < 6) return;
+
+            // SMART SPLIT FROM RIGHT: Coordinates are always the last N parts
+            // Line format: [IMAGE PATH WITH SPACES] [CLASS_ID] [X1] [Y1] ...
+            let splitIdx = -1;
+            for (let i = 1; i < parts.length - 4; i++) {
+                // Check if this part and all following are strictly numbers
+                const suffix = parts.slice(i);
+                const allNumeric = suffix.every(p => /^-?\d*\.?\d+(?:[eE][-+]?\d+)?$/.test(p));
+                if (allNumeric) {
+                    splitIdx = i;
+                    break;
+                }
+            }
+
+            if (splitIdx === -1) {
+                console.warn(`[AnnotationConverter] Could not parse line ${lineIdx}: ${line}`);
+                return;
+            }
+
+            const imagePath = parts.slice(0, splitIdx).join(' '); // Re-join file name with spaces
+            const classId = parseInt(parts[splitIdx]);
+            const coords = parts.slice(splitIdx + 1).map(parseFloat);
 
             if (isNaN(classId) || coords.some(isNaN)) return;
 
-            // Check if image exists in project
-            const imageInfo = imageMap.get(imageName);
+            // Akıllı Eşleşme: Önce tam yol, sonra sadece dosya ismi
+            let resolvedFullName = imagePath;
+            let imageInfo = imageMap.get(imagePath);
+
             if (!imageInfo) {
-                if (!orphans.includes(imageName)) {
-                    orphans.push(imageName);
-                    console.warn(`[FormatConverter] Skipping orphan annotations for: ${imageName}`);
+                const baseInText = imagePath.split('/').pop();
+                if (baseNameMap.has(baseInText)) {
+                    resolvedFullName = baseNameMap.get(baseInText);
+                    imageInfo = imageMap.get(resolvedFullName);
+                }
+            }
+
+            if (!imageInfo) {
+                if (!orphans.includes(imagePath)) {
+                    orphans.push(imagePath);
+                    console.error(`[AnnotationConverter] Missing Image! No match for "${imagePath}"`);
                 }
                 return;
             }
 
+            const targetKey = resolvedFullName;
+
             // Initialize annotation array for this image
-            if (!annotations[imageName]) {
-                annotations[imageName] = [];
+            if (!annotations[targetKey]) {
+                annotations[targetKey] = [];
             }
 
             // Denormalize coordinates
@@ -659,8 +784,8 @@ ${objectElements.join('\n')}
             // Get class name
             const label = classNames[classId] || `class_${classId}`;
 
-            annotations[imageName].push({
-                id: `${imageName}_${annotations[imageName].length}`,
+            annotations[targetKey].push({
+                id: `${targetKey}_${annotations[targetKey].length}`,
                 type: 'poly',
                 label,
                 points,
@@ -736,11 +861,17 @@ ${objectElements.join('\n')}
             throw new Error('Invalid XML format: ' + parseError.textContent);
         }
 
-        // Build image lookup
+        // Build image lookup: exact match AND filename-only match
         const imageMap = new Map();
+        const baseNameMap = new Map();
+
         projectImages.forEach(img => {
-            const name = img.name || img.file_name;
-            imageMap.set(name, { width: img.width || 0, height: img.height || 0 });
+            const fullName = img.path || img.name || img.file_name;
+            const size = { width: img.width || 0, height: img.height || 0 };
+            imageMap.set(fullName, size);
+
+            const base = (img.name || fullName).split('/').pop();
+            baseNameMap.set(base, fullName);
         });
 
         const annotations = {};
@@ -756,18 +887,29 @@ ${objectElements.join('\n')}
 
             if (!filename) return;
 
-            // Check if image exists in project
-            if (!imageMap.has(filename)) {
+            // Akıllı Eşleşme (VOC)
+            let resolvedFullName = filename;
+            let imgInfo = imageMap.get(filename);
+
+            if (!imgInfo) {
+                const baseInXml = filename.split('/').pop();
+                if (baseNameMap.has(baseInXml)) {
+                    resolvedFullName = baseNameMap.get(baseInXml);
+                    imgInfo = imageMap.get(resolvedFullName);
+                }
+            }
+
+            if (!imgInfo) {
                 if (!orphans.includes(filename)) {
                     orphans.push(filename);
-                    console.warn(`[FormatConverter] Skipping orphan annotations for: ${filename}`);
+                    console.warn(`[FormatConverter] No matching image for VOC record: ${filename}`);
                 }
                 return;
             }
 
-            const imgInfo = imageMap.get(filename);
-            if (!annotations[filename]) {
-                annotations[filename] = [];
+            const targetKey = resolvedFullName;
+            if (!annotations[targetKey]) {
+                annotations[targetKey] = [];
             }
 
             // Parse objects
@@ -785,8 +927,8 @@ ${objectElements.join('\n')}
                 // Convert bbox to polygon (4 corners)
                 const points = [xmin, ymin, xmax, ymin, xmax, ymax, xmin, ymax];
 
-                annotations[filename].push({
-                    id: `${filename}_${idx}`,
+                annotations[targetKey].push({
+                    id: `${targetKey}_${idx}`,
                     type: 'poly',
                     label: name,
                     points,
@@ -875,8 +1017,13 @@ ${annotationElements.join('\n')}
 
         // Build image lookup from project
         const projectImageMap = new Map();
+        const baseNameMap = new Map();
+
         projectImages.forEach(img => {
-            projectImageMap.set(img.name || img.file_name, img);
+            const fullName = img.path || img.name || img.file_name;
+            projectImageMap.set(fullName, img);
+            const base = (img.name || fullName).split('/').pop();
+            baseNameMap.set(base, fullName);
         });
 
         // Build image_id to filename map from COCO
@@ -898,20 +1045,32 @@ ${annotationElements.join('\n')}
             const imageName = imageIdToName.get(ann.image_id);
             if (!imageName) return;
 
-            // Check if image exists in project
-            if (!projectImageMap.has(imageName)) {
+            // Akıllı Eşleşme (COCO)
+            let resolvedFullName = imageName;
+            let exists = projectImageMap.has(imageName);
+
+            if (!exists) {
+                const baseInCoco = imageName.split('/').pop();
+                if (baseNameMap.has(baseInCoco)) {
+                    resolvedFullName = baseNameMap.get(baseInCoco);
+                    exists = true;
+                }
+            }
+
+            if (!exists) {
                 if (!orphans.includes(imageName)) {
                     orphans.push(imageName);
-                    console.warn(`[FormatConverter] Skipping orphan annotations for: ${imageName}`);
+                    console.warn(`[FormatConverter] COCO orphan: ${imageName}`);
                 }
                 return;
             }
 
-            if (!annotations[imageName]) {
-                annotations[imageName] = [];
+            const targetKey = resolvedFullName;
+            if (!annotations[targetKey]) {
+                annotations[targetKey] = [];
             }
 
-            annotations[imageName].push({
+            annotations[targetKey].push({
                 id: String(ann.id),
                 type: 'poly',
                 label: catIdToName.get(ann.category_id) || 'unknown',
@@ -1002,8 +1161,13 @@ ${annotationElements.join('\n')}
 
         // Build project image lookup
         const projectImageMap = new Map();
+        const baseNameMap = new Map();
+
         projectImages.forEach(img => {
-            projectImageMap.set(img.name || img.file_name, img);
+            const fullName = img.path || img.name || img.file_name;
+            projectImageMap.set(fullName, img);
+            const base = (img.name || fullName).split('/').pop();
+            baseNameMap.set(base, fullName);
         });
 
         const categories = toonData.c || [];
@@ -1014,19 +1178,31 @@ ${annotationElements.join('\n')}
             const [fileName, width, height] = imgData.m || ['image.jpg', 0, 0];
             const data = imgData.d || [];
 
-            // Check if image exists in project
-            if (!projectImageMap.has(fileName)) {
+            // Akıllı Eşleşme (TOON)
+            let resolvedFullName = fileName;
+            let exists = projectImageMap.has(fileName);
+
+            if (!exists) {
+                const baseInToon = fileName.split('/').pop();
+                if (baseNameMap.has(baseInToon)) {
+                    resolvedFullName = baseNameMap.get(baseInToon);
+                    exists = true;
+                }
+            }
+
+            if (!exists) {
                 if (!orphans.includes(fileName)) {
                     orphans.push(fileName);
-                    console.warn(`[FormatConverter] Skipping orphan annotations for: ${fileName}`);
+                    console.warn(`[FormatConverter] TOON orphan: ${fileName}`);
                 }
                 return;
             }
 
-            annotations[fileName] = data.map((item, idx) => {
+            const targetKey = resolvedFullName;
+            annotations[targetKey] = data.map((item, idx) => {
                 const [catIdx, points] = item;
                 return {
-                    id: `${fileName}_${idx}`,
+                    id: `${targetKey}_${idx}`,
                     type: 'poly',
                     label: categories[catIdx] || 'unknown',
                     points: points || [],

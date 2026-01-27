@@ -14,6 +14,7 @@ const FileExplorer = ({
     onRemoveFile,
     onSaveAll,
     onExportProject,
+    onClearLabels,
     isProcessing = false,
     processingProgress = { processed: 0, total: 0 }
 }) => {
@@ -168,15 +169,21 @@ const FileExplorer = ({
                     <h3>📁 Explorer</h3>
                     <div className="file-count">{files.length} images • {annotationCount} labels</div>
                 </div>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <button
-                        onClick={() => { if (window.confirm('Clear everything?')) onClearAll(); }}
-                        className="icon-btn"
-                        title="Clear Project"
-                    >
-                        🗑️
-                    </button>
-                </div>
+                <button
+                    onClick={() => { if (window.confirm('Clear all labels? Images will be kept.')) onClearLabels(); }}
+                    className="icon-btn"
+                    title="Clear All Labels"
+                    style={{ color: '#ffcc00' }}
+                >
+                    📋❌
+                </button>
+                <button
+                    onClick={() => { if (window.confirm('Clear everything (Images + Labels)?')) onClearAll(); }}
+                    className="icon-btn"
+                    title="Clear Project"
+                >
+                    🗑️
+                </button>
             </div>
 
             {/* Split Upload Zones */}

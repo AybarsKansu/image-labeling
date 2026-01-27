@@ -79,8 +79,43 @@ function App() {
   const [showExportModal, setShowExportModal] = useState(false);
 
   // ============================================
-  // HELPER: Selection Menu Position
+  // AUTO-SAVE: Persistence Bridge
   // ============================================
+  const isInitialLoad = useRef(true);
+
+  // Sync memory annotations back to IndexedDB
+  useEffect(() => {
+    if (isInitialLoad.current) {
+      isInitialLoad.current = false;
+      return;
+    }
+
+    if (fileSystem.activeFileId) {
+      const timer = setTimeout(() => {
+        const options = {};
+        if (stage.imageObj) {
+          options.width = stage.imageObj.naturalWidth;
+          options.height = stage.imageObj.naturalHeight;
+        }
+        fileSystem.updateActiveAnnotations(annotationsHook.annotations, options);
+      }, 500); // Debounce saves
+      return () => clearTimeout(timer);
+    }
+  }, [annotationsHook.annotations, fileSystem.activeFileId]);
+
+  // Sync memory back to file list (to update label counts in sidebar)
+  useEffect(() => {
+    if (fileSystem.activeFileId) {
+      // This is a local optimization to keep counts accurate without full DB re-render
+      // The fileSystem.files already uses useLiveQuery so it will update eventually, 
+      // but updating activeFileData immediately helps with immediate sync.
+    }
+  }, [annotationsHook.annotations]);
+
+  // Reset initial load flag when file changes
+  useEffect(() => {
+    isInitialLoad.current = true;
+  }, [fileSystem.activeFileId]);
   const menuPosition = useMemo(() => {
     if (annotationsHook.selectedIds.length < 2 || !stage.imageObj) return null;
     const selectedAnns = annotationsHook.selectedAnns;
@@ -468,6 +503,7 @@ function App() {
             files={fileSystem.files} activeFileId={fileSystem.activeFileId}
             onSelectFile={fileSystem.selectFile} onIngestFiles={fileSystem.ingestFiles}
             onClearAll={fileSystem.clearProject} onRetryFile={fileSystem.retryFile}
+            onClearLabels={fileSystem.clearAllLabels}
             onRemoveFile={fileSystem.removeFile}
             onSaveAll={handleSaveAll}
             isProcessing={fileSystem.isProcessing} processingProgress={fileSystem.processingProgress}

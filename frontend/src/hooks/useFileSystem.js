@@ -127,10 +127,10 @@ export function useFileSystem() {
 
                 if (existing) {
                     // Update existing record with label data
+                    // If we have image dimensions now, we should preserve them
                     await db.files.update(existing.id, {
                         label_data: label.data,
-                        path: existing.path || label.path || '', // Prefer image path
-                        // If it was missing-label, it now has both.
+                        path: existing.path || label.path || '',
                         status: existing.blob ? FileStatus.PENDING : FileStatus.MISSING_IMAGE
                     });
                 } else {
@@ -139,10 +139,12 @@ export function useFileSystem() {
                         name: `(Missing Image) ${label.baseName}`,
                         baseName: label.baseName,
                         path: label.path || '',
-                        type: 'image', // Still categorized as image record for UI consistency
+                        type: 'image',
                         blob: null,
                         thumbnail: null,
                         label_data: label.data,
+                        width: 0,
+                        height: 0,
                         status: FileStatus.MISSING_IMAGE,
                         created_at: new Date().toISOString()
                     });
@@ -245,23 +247,25 @@ export function useFileSystem() {
 
             // Check for label types
             if (/\.(json|xml|txt)$/i.test(file.name)) {
-                if (file.name.toLowerCase().endsWith('.txt')) {
-                    singleLabels.push({ file, _customPath: filePath });
-                } else {
-                    try {
-                        const text = await readFileAsText(file);
-                        const AnnotationConverter = (await import('../utils/annotationConverter')).AnnotationConverter;
-                        const format = AnnotationConverter.detectFormat(text);
+                try {
+                    const text = await readFileAsText(file);
+                    const AnnotationConverter = (await import('../utils/annotationConverter')).AnnotationConverter;
+                    const format = AnnotationConverter.detectFormat(text);
 
-                        if (['coco', 'toon-batch', 'voc-aggregated', 'yolo-aggregated'].includes(format)) {
-                            batchLabels.push({ file, content: text, format, path: filePath });
-                        } else {
-                            singleLabels.push({ file, _customPath: filePath });
-                        }
-                    } catch (e) {
-                        console.warn(`Failed to analyze ${file.name}, treating as single/ignored.`);
-                        singleLabels.push({ file, _customPath: filePath });
+                    // List of formats that contain MULTIPLE images (Batch)
+                    const batchFormats = ['coco', 'toon-batch', 'voc-aggregated', 'yolo-aggregated'];
+
+                    if (batchFormats.includes(format)) {
+                        console.log(`[FileSystem] Batch Label detected: ${file.name} (${format})`);
+                        batchLabels.push({ file, content: text, format, path: filePath });
+                    } else {
+                        // It's a single-image label (Single YOLO, Single VOC, Single TOON, or Single-image COCO)
+                        console.log(`[FileSystem] Single Label detected: ${file.name} (${format})`);
+                        singleLabels.push({ file, _customPath: filePath, content: text, format });
                     }
+                } catch (e) {
+                    console.warn(`Failed to analyze ${file.name}, defaulting to single label queue.`);
+                    singleLabels.push({ file, _customPath: filePath });
                 }
             }
         }
@@ -287,23 +291,32 @@ export function useFileSystem() {
                     const projectImages = await db.files.toArray();
                     const result = AnnotationConverter.parseAnnotations(item.content, projectImages, item.format);
 
-                    for (const [imageName, anns] of Object.entries(result.annotations)) {
-                        const existing = await db.files.where('name').equals(imageName).first();
+                    const annotationsToProcess = Object.entries(result.annotations);
+                    console.log(`[FileSystem] Processing ${annotationsToProcess.length} matched files...`);
+
+                    for (const [imageName, anns] of annotationsToProcess) {
+                        // REFINED LOOKUP
+                        let existing = await db.files.where('path').equals(imageName).first();
+                        if (!existing) {
+                            existing = await db.files.where('name').equals(imageName).first();
+                        }
 
                         const toonData = AnnotationConverter.internalToToon(anns, {
-                            name: imageName, width: 800, height: 600
+                            name: imageName, width: existing?.width || 800, height: existing?.height || 600
                         });
 
                         if (existing) {
+                            console.log(`[FileSystem] Updating existing image: ${imageName} (ID: ${existing.id})`);
                             await db.files.update(existing.id, {
                                 label_data: toonData,
                                 status: existing.blob ? FileStatus.PENDING : FileStatus.MISSING_IMAGE
                             });
                         } else {
+                            console.warn(`[FileSystem] Creating NEW placeholder for "${imageName}" -> MISSING IMAGE`);
                             await db.files.add({
-                                name: imageName,
-                                baseName: imageName.replace(/\.[^/.]+$/, ""),
-                                path: item.path || '', // Use the label file's path for grouping if needed
+                                name: imageName.split('/').pop(),
+                                baseName: imageName.replace(/\.[^/.]+$/, "").split('/').pop(),
+                                path: imageName,
                                 type: 'image',
                                 blob: null,
                                 thumbnail: null,
@@ -317,6 +330,22 @@ export function useFileSystem() {
                 } catch (err) {
                     console.error(`Batch process failed for ${item.file.name}:`, err);
                     setError(`Batch import failed: ${err.message}`);
+                }
+            }
+
+            // Force refresh of active file if it was updated during batch process
+            if (activeFileId) {
+                const activeUpdated = batchLabels.some(item => {
+                    // This is a bit complex as we don't know exactly which images were in which batch
+                    // but we can just trigger a refresh to be safe if any batch was processed
+                    return true;
+                });
+
+                if (activeUpdated) {
+                    console.log('[FileSystem] Batch process complete, refreshing active file UI...');
+                    const currentId = activeFileId;
+                    setActiveFileId(null);
+                    setTimeout(() => setActiveFileId(currentId), 50);
                 }
             }
 
@@ -390,35 +419,43 @@ export function useFileSystem() {
     /**
      * Update annotations for the active file.
      */
-    const updateActiveAnnotations = useCallback(async (annotations, format = 'yolo') => {
+    const updateActiveAnnotations = useCallback(async (annotations, options = {}) => {
         if (!activeFileId) return;
 
-        const labelData = serializeAnnotations(annotations, format, classNames, activeFileData?.width, activeFileData?.height);
+        const { width, height, format = 'yolo' } = options;
+        const w = width || activeFileData?.width || 0;
+        const h = height || activeFileData?.height || 0;
+
+        const labelData = serializeAnnotations(annotations, format, classNames, w, h);
 
         await updateFile(activeFileId, {
             label_data: labelData,
-            status: FileStatus.PENDING // Mark as pending for re-sync
+            width: w || undefined,
+            height: h || undefined,
+            status: FileStatus.PENDING
         });
 
-    }, [activeFileId, classNames]);
+    }, [activeFileId, classNames, activeFileData]);
 
-    /**
-     * Update annotations for any file by ID.
-     */
-    const updateFileAnnotations = useCallback(async (fileId, annotations) => {
+    const updateFileAnnotations = useCallback(async (fileId, annotations, options = {}) => {
         const file = await getFile(fileId);
         if (!file) return;
 
-        // Convert annotations to TOON format for storage
+        const { width, height } = options;
+        const w = width || file.width || 0;
+        const h = height || file.height || 0;
+
         const AnnotationConverter = (await import('../utils/annotationConverter')).AnnotationConverter;
         const labelData = AnnotationConverter.internalToToon(annotations, {
             name: file.name,
-            width: file.width || 800,
-            height: file.height || 600
+            width: w,
+            height: h
         });
 
         await updateFile(fileId, {
             label_data: labelData,
+            width: w || undefined,
+            height: h || undefined,
             status: FileStatus.PENDING
         });
     }, []);
@@ -443,6 +480,40 @@ export function useFileSystem() {
         if (fileId === activeFileId) {
             setActiveFileId(null);
             setActiveFileData(null);
+        }
+    }, [activeFileId]);
+
+    /**
+     * Clear all labels but keep images
+     */
+    const clearAllLabels = useCallback(async () => {
+        try {
+            setIsProcessing(true);
+            const allFiles = await db.files.toArray();
+
+            const updates = allFiles.map(file => ({
+                id: file.id,
+                label_data: null,
+                status: file.blob ? FileStatus.MISSING_LABEL : FileStatus.MISSING_IMAGE
+            }));
+
+            await db.files.bulkPut(updates.map(u => ({
+                ...(allFiles.find(f => f.id === u.id)),
+                ...u
+            })));
+
+            // Refresh active file UI
+            if (activeFileId) {
+                const currentId = activeFileId;
+                setActiveFileId(null);
+                setTimeout(() => setActiveFileId(currentId), 50);
+            }
+
+            setIsProcessing(false);
+        } catch (err) {
+            console.error('Failed to clear labels:', err);
+            setError(err.message);
+            setIsProcessing(false);
         }
     }, [activeFileId]);
 
@@ -538,6 +609,7 @@ export function useFileSystem() {
         saveProjectToBackend,
         ingestFiles,
         clearProject,
+        clearAllLabels,
         retryFile,
         renameClass,
         renameClassActiveOnly,
@@ -594,14 +666,51 @@ async function renameClass(oldName, newName, classNames, setClassNames) {
     })));
 }
 
-// Helper: Parse label data (YOLO format) to annotations array
+// Helper: Parse label data to annotations array (Handles TOON objects and YOLO strings)
 function parseLabelData(labelData, classNames, imgWidth = 0, imgHeight = 0) {
     if (!labelData) return [];
 
-    // Ensure string
+    // CASE 1: TOON Format (Internal storage object)
+    if (typeof labelData === 'object' && labelData !== null && labelData.v === '1.0') {
+        const categories = labelData.c || [];
+        const data = labelData.d || [];
+
+        return data.map((item, idx) => {
+            const [catIdx, rawPoints] = item;
+            const label = categories[catIdx] || classNames[catIdx] || `class_${catIdx}`;
+
+            // TOON points are absolute. If we have new dimensions, we might need to re-scale 
+            // but for now we assume they are absolute or normalized properly based on previous save.
+            let points = [...rawPoints];
+
+            // Heuristic: If points are 0..1 and we have dimensions, denormalize them
+            const isNormalized = points.length > 0 && points.every(p => p <= 1.05); // Allow slight overflow
+            if (isNormalized && imgWidth && imgHeight) {
+                points = points.map((p, i) => i % 2 === 0 ? p * imgWidth : p * imgHeight);
+            }
+
+            return {
+                id: `ann_${idx}`,
+                type: 'poly',
+                label,
+                points,
+                originalRawPoints: points
+            };
+        });
+    }
+
+    // CASE 2: YOLO Format (Raw string fallback)
     const dataStr = typeof labelData === 'string' ? labelData : JSON.stringify(labelData);
 
-    // 1. Strictly use embedded classes found in THIS specific file string
+    // Check if it's actually TOON hidden in a string
+    if (dataStr.trim().startsWith('{')) {
+        try {
+            const parsed = JSON.parse(dataStr);
+            if (parsed.v === '1.0') return parseLabelData(parsed, classNames, imgWidth, imgHeight);
+        } catch (e) { }
+    }
+
+    // Standard YOLO string parsing
     let localClassNames = [];
     const embeddedMatch = dataStr.match(/^#\s*classes?:\s*(.+)$/im);
     if (embeddedMatch) {
@@ -615,54 +724,41 @@ function parseLabelData(labelData, classNames, imgWidth = 0, imgHeight = 0) {
         if (parts.length < 5) return null;
 
         const classId = parseInt(parts[0]);
-        // 2. Fallback: use 'class_n' if local list doesn't have the index. 
-        // Global state is ignored as requested.
-        const className = localClassNames[classId] || `class_${classId}`;
+        const className = localClassNames[classId] || classNames[classId] || `class_${classId}`;
 
-        // YOLO format: class_id x_center y_center width height [...polygon points]
         if (parts.length === 5) {
-            // Bounding box
+            // YOLO Bbox
             const xc = parseFloat(parts[1]);
             const yc = parseFloat(parts[2]);
             const w = parseFloat(parts[3]);
             const h = parseFloat(parts[4]);
 
-            // Denormalize if we have dimensions
-            const absW = imgWidth ? w * imgWidth : w;
-            const absH = imgHeight ? h * imgHeight : h;
-            const absX = imgWidth ? (xc * imgWidth) - (absW / 2) : xc;
-            const absY = imgHeight ? (yc * imgHeight) - (absH / 2) : yc;
-
-            // Note: internal state expects TOP-LEFT (x,y) and w,h for boxes
-            // but some project tools might use center. 
-            // Based on CanvasStage, it uses {x, y, width, height} for Rect.
+            const absW = imgWidth ? w * imgWidth : w * 800;
+            const absH = imgHeight ? h * imgHeight : h * 600;
+            const absX = imgWidth ? (xc * imgWidth) - (absW / 2) : (xc * 800) - (absW / 2);
+            const absY = imgHeight ? (yc * imgHeight) - (absH / 2) : (yc * 600) - (absH / 2);
 
             return {
                 id: `ann_${idx}`,
                 type: 'box',
                 label: className,
-                classId,
-                x: absX,
-                y: absY,
-                w: absW,
-                h: absH,
-                points: [absX, absY, absX + absW, absY, absX + absW, absY + absH, absX, absY + absH] // Also add points for generic tools
+                x: absX, y: absY, w: absW, h: absH,
+                points: [absX, absY, absX + absW, absY, absX + absW, absY + absH, absX, absY + absH]
             };
         } else {
-            // Polygon (segmentation)
+            // YOLO Polygon
             const points = [];
             for (let i = 1; i < parts.length; i += 2) {
                 const px = parseFloat(parts[i]);
                 const py = parseFloat(parts[i + 1]);
-                points.push(imgWidth ? px * imgWidth : px);
-                points.push(imgHeight ? py * imgHeight : py);
+                points.push(imgWidth ? px * imgWidth : px * 800);
+                points.push(imgHeight ? py * imgHeight : py * 600);
             }
             return {
                 id: `ann_${idx}`,
                 type: 'poly',
                 label: className,
-                classId,
-                points // Denormalized
+                points
             };
         }
     }).filter(Boolean);

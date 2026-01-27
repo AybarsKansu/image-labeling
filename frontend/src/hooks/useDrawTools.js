@@ -628,6 +628,8 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
                 }));
 
                 setAnnotations(prev => [...prev, ...newAnns]);
+                // Clear filter text so results are visible
+                setFilterText('');
                 // Optional user feedback
                 // setSaveMessage(`✅ Found ${newAnns.length} objects`);
             } else if (res.data.detections?.length === 0) {
