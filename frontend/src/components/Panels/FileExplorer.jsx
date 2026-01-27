@@ -4,42 +4,55 @@ import { useDropzone } from 'react-dropzone';
 import { FileStatus } from '../../db/index';
 import './FileExplorer.css';
 
+
 const FileExplorer = ({
     files = [],
     activeFileId,
     onSelectFile,
-    onIngestFiles,
+    onIngestFiles, // Still used for images
+    onImportLabels, // NEW: Handler for label files
     onClearAll,
     onRetryFile,
     onRemoveFile,
     onSaveAll,
+    // Export handlers - Now unified
+    onExportProject,
     isSyncEnabled,
     onToggleSync,
     syncStats = { pending: 0, syncing: 0, synced: 0, total: 0 },
     isProcessing = false,
     processingProgress = { processed: 0, total: 0 }
 }) => {
-    const fileInputRef = useRef(null);
-    const folderInputRef = useRef(null);
     const [collapsedFolders, setCollapsedFolders] = useState(new Set());
+    const [showExportMenu, setShowExportMenu] = useState(false);
 
-    // --- Dropzone Logic ---
-    const onDrop = useCallback((acceptedFiles) => {
+    // --- Dropzone 1: Images Only ---
+    const onDropImages = useCallback((acceptedFiles) => {
         if (acceptedFiles.length > 0) onIngestFiles(acceptedFiles);
     }, [onIngestFiles]);
 
-    const { getRootProps, getInputProps, isDragActive } = useDropzone({
-        onDrop,
-        accept: { 'image/*': ['.jpg', '.jpeg', '.png', '.webp'], 'text/plain': ['.txt'] },
-        noClick: true,
+    const { getRootProps: getImageRoot, getInputProps: getImageInput, isDragActive: isImageDrag } = useDropzone({
+        onDrop: onDropImages,
+        accept: { 'image/*': ['.jpg', '.jpeg', '.png', '.webp'] },
+        noClick: false,
         noKeyboard: true
     });
 
-    const handleSelect = (e) => {
-        const selected = Array.from(e.target.files || []);
-        if (selected.length > 0) onIngestFiles(selected);
-        e.target.value = '';
-    };
+    // --- Dropzone 2: Labels (Single File Aggregated) ---
+    const onDropLabels = useCallback((acceptedFiles) => {
+        if (acceptedFiles.length > 0) onImportLabels(acceptedFiles[0]); // Only take first file
+    }, [onImportLabels]);
+
+    const { getRootProps: getLabelRoot, getInputProps: getLabelInput, isDragActive: isLabelDrag } = useDropzone({
+        onDrop: onDropLabels,
+        accept: {
+            'application/json': ['.json'],
+            'text/plain': ['.txt'],
+            'text/xml': ['.xml']
+        },
+        noClick: false,
+        noKeyboard: true
+    });
 
     const toggleFolder = (path) => {
         setCollapsedFolders(prev => {
@@ -57,22 +70,16 @@ const FileExplorer = ({
 
         // 1. Group by directory path
         files.forEach(file => {
-            // Remove filename from path to get directory path
             const parts = file.path ? file.path.split('/') : [];
             const dirPath = parts.slice(0, -1).join('/') || 'Root';
-
             if (!folders[dirPath]) folders[dirPath] = [];
             folders[dirPath].push(file);
         });
 
-        // 2. Sort folder keys (alphabetic)
         const sortedPaths = Object.keys(folders).sort();
 
-        // 3. Flatten for Virtuoso
         sortedPaths.forEach(path => {
             const isCollapsed = collapsedFolders.has(path);
-
-            // Add folder header
             flatList.push({
                 type: 'folder',
                 path: path,
@@ -81,13 +88,9 @@ const FileExplorer = ({
                 isCollapsed
             });
 
-            // Add files if not collapsed
             if (!isCollapsed) {
                 folders[path].forEach(file => {
-                    flatList.push({
-                        type: 'file',
-                        data: file
-                    });
+                    flatList.push({ type: 'file', data: file });
                 });
             }
         });
@@ -98,9 +101,7 @@ const FileExplorer = ({
     const syncPercent = syncStats.total > 0 ? Math.round((syncStats.synced / syncStats.total) * 100) : 0;
 
     return (
-        <div className="file-explorer" {...getRootProps()}>
-            <input {...getInputProps()} />
-
+        <div className="file-explorer">
             <div className="explorer-header">
                 <div>
                     <h3>📁 Explorer</h3>
@@ -124,12 +125,19 @@ const FileExplorer = ({
                 </div>
             </div>
 
-            <div className="upload-buttons">
-                <input ref={fileInputRef} type="file" multiple onChange={handleSelect} style={{ display: 'none' }} />
-                <input ref={folderInputRef} type="file" webkitdirectory="" directory="" multiple onChange={handleSelect} style={{ display: 'none' }} />
+            {/* Split Upload Zones */}
+            <div className="upload-group">
+                <div {...getImageRoot()} className={`upload-zone ${isImageDrag ? 'active' : ''}`}>
+                    <input {...getImageInput()} />
+                    <div className="upload-zone-label"><span>🖼️</span> Add Images</div>
+                    <div className="upload-zone-sub">Drag & drop images</div>
+                </div>
 
-                <button className="upload-btn" onClick={() => fileInputRef.current?.click()}>📄 Files</button>
-                <button className="upload-btn" onClick={() => folderInputRef.current?.click()}>📂 Folder</button>
+                <div {...getLabelRoot()} className={`upload-zone ${isLabelDrag ? 'active' : ''}`}>
+                    <input {...getLabelInput()} />
+                    <div className="upload-zone-label"><span>📝</span> Import Labels</div>
+                    <div className="upload-zone-sub">Single file (.txt, .xml, .json)</div>
+                </div>
             </div>
 
             {/* Status Bars */}
@@ -151,13 +159,13 @@ const FileExplorer = ({
                 </div>
             )}
 
-            {/* Drag Overlay */}
-            {isDragActive && <div className="drag-overlay"><span>📥 Drop to upload</span></div>}
-
             {/* Virtual Tree List */}
             <div className="file-list-container">
                 {files.length === 0 ? (
-                    <div className="empty-state"><p>Drop files or folders to start</p></div>
+                    <div className="empty-state" style={{ padding: '20px', textAlign: 'center', color: '#666', fontSize: '12px' }}>
+                        <p>No files loaded.</p>
+                        <p>Use the buttons above to start.</p>
+                    </div>
                 ) : (
                     <Virtuoso
                         style={{ height: '100%' }}
@@ -178,7 +186,6 @@ const FileExplorer = ({
 
                             const { data: file } = item;
                             const isActive = file.id === activeFileId;
-                            const statusIcon = getStatusIcon(file.status);
                             const hasError = file.status === FileStatus.ERROR;
                             const isSynced = file.status === FileStatus.SYNCED;
 
@@ -205,8 +212,9 @@ const FileExplorer = ({
                                                     e.stopPropagation();
                                                     if (window.confirm(`Remove ${file.name}?`)) onRemoveFile(file.id);
                                                 }}
+                                                title="Delete"
                                             >
-                                                ✕
+                                                🗑️
                                             </button>
                                         </div>
                                         <div className="file-meta">
@@ -222,7 +230,7 @@ const FileExplorer = ({
                                                 }}
                                                 className={hasError ? 'retry-trigger' : ''}
                                             >
-                                                {statusIcon}
+                                                {getStatusIcon(file.status)}
                                             </span>
                                             {file.label_data && <span className="label-indicator">📋</span>}
                                         </div>
@@ -234,15 +242,40 @@ const FileExplorer = ({
                 )}
             </div>
 
-            {/* Footer Actions */}
+            {/* Sticky Footer */}
             <div className="explorer-footer">
-                <button
-                    className="save-all-btn"
-                    onClick={() => onSaveAll && onSaveAll()}
-                    disabled={files.length === 0 || syncStats.pending > 0}
-                >
-                    🚀 Save All for Training
-                </button>
+                {showExportMenu && (
+                    <div className="export-popover">
+                        <button className="export-option" onClick={() => { onExportProject && onExportProject('yolo_agg'); setShowExportMenu(false); }}>
+                            📋 YOLO (Aggregated .txt)
+                        </button>
+                        <button className="export-option" onClick={() => { onExportProject && onExportProject('voc_agg'); setShowExportMenu(false); }}>
+                            🧩 VOC (Aggregated .xml)
+                        </button>
+                        <button className="export-option" onClick={() => { onExportProject && onExportProject('coco'); setShowExportMenu(false); }}>
+                            🥥 COCO (Standard .json)
+                        </button>
+                        <button className="export-option" onClick={() => { onExportProject && onExportProject('toon'); setShowExportMenu(false); }}>
+                            🎨 Toon (Custom .json)
+                        </button>
+                    </div>
+                )}
+
+                <div className="footer-actions-row">
+                    <button
+                        className="action-btn"
+                        onClick={() => setShowExportMenu(!showExportMenu)}
+                    >
+                        📤 Export Project
+                    </button>
+                    <button
+                        className="action-btn primary"
+                        onClick={() => onSaveAll && onSaveAll()}
+                        disabled={files.length === 0}
+                    >
+                        💾 Save All
+                    </button>
+                </div>
             </div>
         </div>
     );

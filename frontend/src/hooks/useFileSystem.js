@@ -290,7 +290,22 @@ export function useFileSystem() {
             status: FileStatus.PENDING // Mark as pending for re-sync
         });
 
-    }, [activeFileId, classNames]);
+    }, [activeFileId, classNames, activeFileData]);
+
+    /**
+     * Update annotations for ANY file by ID (Used by Snapshot Import)
+     */
+    const updateFileAnnotations = useCallback(async (fileId, annotations) => {
+        const file = await db.files.get(fileId);
+        if (!file) return;
+
+        const labelData = serializeAnnotations(annotations, 'yolo', classNames, file.width, file.height);
+
+        await updateFile(fileId, {
+            label_data: labelData,
+            status: FileStatus.PENDING
+        });
+    }, [classNames]);
 
     /**
      * Delete a file from the system.
@@ -377,6 +392,7 @@ export function useFileSystem() {
         renameClassActiveOnly,
         selectFile,
         updateActiveAnnotations,
+        updateFileAnnotations,
         removeFile,
         setClassNames
     };

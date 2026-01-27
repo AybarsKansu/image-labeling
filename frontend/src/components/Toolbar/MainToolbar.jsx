@@ -431,8 +431,8 @@ const MainToolbar = ({
 
             {/* Save Message */}
             {saveMessage && (
-                <div className="save-message">
-                    {saveMessage}
+                <div className={`save-message ${saveMessage.type || 'info'}`}>
+                    {saveMessage.text || saveMessage}
                 </div>
             )}
         </div>

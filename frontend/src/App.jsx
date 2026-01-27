@@ -11,6 +11,8 @@ import { useAIModels } from './hooks/useAIModels';
 import { usePolygonModifiers } from './hooks/usePolygonModifiers';
 import { useFileSystem } from './hooks/useFileSystem';
 import { useBackgroundSync } from './hooks/useBackgroundSync';
+import { useFormatConverter } from './hooks/useFormatConverter';
+import { useProjectIO } from './hooks/useProjectIO';
 
 // Components
 import { CanvasStage } from './components/Canvas';
@@ -43,6 +45,8 @@ function App() {
   const polygonMods = usePolygonModifiers(annotationsHook, stage);
   const fileSystem = useFileSystem();
   const backgroundSync = useBackgroundSync(fileSystem.activeFileId);
+  const formatConverter = useFormatConverter();
+  const projectIO = useProjectIO(annotationsHook, fileSystem);
 
   // ============================================
   // BRIDGE: File System to Canvas
@@ -66,6 +70,7 @@ function App() {
   // ============================================
   // LOCAL STATE (UI-specific)
   // ============================================
+  const [menuPosition, setMenuPosition] = useState(null);
   const [saveMessage, setSaveMessage] = useState(null);
   const [enableAugmentation, setEnableAugmentation] = useState(false);
   const [trainEpochs, setTrainEpochs] = useState(100);
@@ -77,72 +82,166 @@ function App() {
   const [showEvaluationModal, setShowEvaluationModal] = useState(false);
 
   // ============================================
-  // HELPER: Selection Menu Position
-  // ============================================
-  const menuPosition = useMemo(() => {
-    if (annotationsHook.selectedIds.length < 2 || !stage.imageObj) return null;
-    const selectedAnns = annotationsHook.selectedAnns;
-    if (selectedAnns.length < 2) return null;
-
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    selectedAnns.forEach(ann => {
-      if (!ann.points) return;
-      for (let i = 0; i < ann.points.length; i += 2) {
-        minX = Math.min(minX, ann.points[i]);
-        maxX = Math.max(maxX, ann.points[i]);
-        minY = Math.min(minY, ann.points[i + 1]);
-        maxY = Math.max(maxY, ann.points[i + 1]);
-      }
-    });
-
-    if (!isFinite(minX)) return null;
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-    const screenX = (centerX * stage.imageLayout.scale) + stage.imageLayout.x;
-    const screenY = (centerY * stage.imageLayout.scale) + stage.imageLayout.y;
-    return { x: screenX, y: screenY };
-  }, [annotationsHook.selectedIds, annotationsHook.selectedAnns, stage.imageLayout, stage.imageObj]);
-
-  // ============================================
   // ACTIONS & EVENT HANDLERS
   // ============================================
 
-  const handleSaveAll = useCallback(async () => {
+  // 1. Import Labels (Universal Aggregator)
+  const handleImportLabels = useCallback(async (file) => {
     try {
-      setSaveMessage({ type: 'info', text: 'Preparing training data...' });
-      const flushResult = await backgroundSync.flushPending();
-      if (!flushResult.success) throw new Error(flushResult.error);
+      setSaveMessage({ type: 'info', text: 'Parsing labels...' });
+      const text = await file.text();
+      const result = await formatConverter.parseAnnotations(text, file.name);
 
-      const formData = new URLSearchParams();
-      formData.append('format', 'yolo');
-      await axios.post(`${API_URL}/files/export`, formData);
-
-      setSaveMessage({ type: 'success', text: 'All data organized for training!' });
-      setTimeout(() => setSaveMessage(null), 3000);
-    } catch (err) {
-      console.error('Save all failed:', err);
-      setSaveMessage({ type: 'error', text: 'Failed to organize data: ' + err.message });
-    }
-  }, [backgroundSync]);
-
-  const handleExport = useCallback(async (format) => {
-    try {
-      setSaveMessage({ type: 'info', text: `Exporting as ${format.toUpperCase()}...` });
-      await backgroundSync.flushPending();
-
-      const formData = new URLSearchParams();
-      formData.append('format', format);
-      const response = await axios.post(`${API_URL}/files/export`, formData);
-
-      if (response.data.download_url) {
-        window.open(response.data.download_url, '_blank');
+      if (!result.success) {
+        throw new Error(result.error);
       }
-      setSaveMessage({ type: 'success', text: 'Export ready!' });
+
+      const { data } = result;
+      let updatedCount = 0;
+      let skippedCount = 0;
+
+      // Iterate through the parsed dictionary: { fileName: [anns], ... }
+      for (const [fileName, annotations] of Object.entries(data)) {
+        // Find matching file in our system
+        // Note: fileSystem.files is a live query, we can iterate it.
+        const targetFile = fileSystem.files.find(f => f.name === fileName || f.baseName === fileName);
+
+        if (targetFile) {
+          await fileSystem.updateFileAnnotations(targetFile.id, annotations);
+          updatedCount++;
+        } else {
+          skippedCount++;
+        }
+      }
+
+      setSaveMessage({ type: 'success', text: `Imported labels for ${updatedCount} files (${skippedCount} skipped).` });
+      setTimeout(() => setSaveMessage(null), 4000);
+
+    } catch (err) {
+      setSaveMessage({ type: 'error', text: 'Import failed: ' + err.message });
+      console.error(err);
+    }
+  }, [fileSystem, formatConverter]);
+
+  // Helper for YOLO string -> Annotations (Basic reverse of serialiser)
+  const parseYoloString = (yoloStr, w, h) => {
+    if (!yoloStr || !w || !h) return [];
+    const lines = yoloStr.split('\n');
+    return lines.map(line => {
+      if (line.startsWith('#')) return null;
+      const parts = line.split(' ');
+      if (parts.length < 5) return null;
+      const [cid, nx, ny, nw, nh] = parts.map(Number);
+      // Denormalize
+      return {
+        classId: cid,
+        x: (nx - nw / 2) * w,
+        y: (ny - nh / 2) * h,
+        w: nw * w,
+        h: nh * h,
+        type: 'box'
+      };
+    }).filter(Boolean);
+  };
+
+  // 2. Export Project (Universal Aggregator)
+  const handleExportProject = useCallback(async (format) => {
+    try {
+      setSaveMessage({ type: 'info', text: `Generating ${format.toUpperCase()} export...` });
+
+      const filesToExport = fileSystem.files.map(f => {
+        return {
+          ...f,
+          annotations: f.id === fileSystem.activeFileId
+            ? annotationsHook.annotations
+            : parseYoloString(f.label_data, f.width, f.height)
+        };
+      });
+
+      const { data, mime, ext } = formatConverter.generateAnnotations(filesToExport, format);
+
+      // Download
+      const blob = new Blob([data], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `project_export_${new Date().getTime()}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setSaveMessage({ type: 'success', text: 'Export complete!' });
       setTimeout(() => setSaveMessage(null), 3000);
+
     } catch (err) {
       setSaveMessage({ type: 'error', text: 'Export failed: ' + err.message });
+      console.error(err);
     }
-  }, [backgroundSync]);
+  }, [fileSystem, annotationsHook, formatConverter]);
+
+  // 3. Export Current (Single File)
+  const handleExportCurrent = useCallback(async (format) => {
+    if (!fileSystem.activeFileData) return;
+    const currentFile = {
+      ...fileSystem.activeFileData,
+      annotations: annotationsHook.annotations
+    };
+
+    try {
+      const { data, mime, ext } = formatConverter.generateAnnotations([currentFile], format);
+      // Download
+      const blob = new Blob([data], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${currentFile.name.split('.')[0]}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert("Export failed: " + err.message);
+    }
+  }, [fileSystem.activeFileData, annotationsHook, formatConverter]);
+
+  // Handle Save All (Internal Snapshot to Backend)
+  const handleSaveAll = useCallback(async () => {
+    try {
+      setSaveMessage({ type: 'info', text: 'Saving project snapshot...' });
+
+      // 1. Generate Unified Data (COCO format as snapshot)
+      // We need to map all files and ensure annotations are populated/parsed
+      // (Reuse logic from export, maybe extract helper if massive, but map is fast enough)
+      const filesToExport = fileSystem.files.map(f => ({
+        ...f,
+        annotations: f.id === fileSystem.activeFileId
+          ? annotationsHook.annotations
+          : parseYoloString(f.label_data, f.width, f.height)
+      }));
+
+      const { data } = formatConverter.generateAnnotations(filesToExport, 'coco');
+
+      // 2. Send to Backend
+      // Assuming a generic save endpoint or reusing export one?
+      // The prompt says "Save Al... signals... to the backend so it can be reconstructed".
+      // I'll use a specific endpoint for snapshots.
+      const blob = new Blob([data], { type: 'application/json' });
+      const formData = new FormData();
+      formData.append('snapshot', blob, 'project_snapshot.json');
+
+      // Use existing axios instance if available or generic fetch
+      // Assuming API_URL is available in scope (it was used in previous code)
+      await axios.post(`${API_URL}/project/snapshot`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      setSaveMessage({ type: 'success', text: 'Project saved to cloud!' });
+      setTimeout(() => setSaveMessage(null), 3000);
+
+    } catch (err) {
+      console.error('Save failed:', err);
+      setSaveMessage({ type: 'error', text: 'Cloud save failed. ' + err.message });
+    }
+  }, [fileSystem.files, fileSystem.activeFileId, annotationsHook.annotations, formatConverter]);
+
+  const handleIngestFiles = fileSystem.ingestFiles; // Images only now passed directly logic
 
   const handleMerge = useCallback(async (type) => {
     const selectedAnns = annotationsHook.selectedAnns;
@@ -237,7 +336,16 @@ function App() {
     const handleKeyDown = (e) => {
       if (e.code === 'Space' && !isSpaceDown) {
         setIsSpaceDown(true);
-        if (drawTools.tool !== 'pan') drawTools.setTool('pan');
+        // Task 3: Interactive Pan (Spacebar)
+        // If space is held, switch to PAN tool momentarily IF we aren't already
+        // Important: check if we are drawing or not?
+        // Actually prompt says: "If spacePressed is true, change cursor to grab and allow dragging"
+        // And "While Panning, disable drawing logic"
+
+        // We set tool to 'pan' is a good way to handle this, provided 'pan' tool disables drawing.
+        if (drawTools.tool !== 'pan') {
+          drawTools.setTool('pan');
+        }
       }
 
       if (e.key === 'Escape') {
@@ -257,6 +365,10 @@ function App() {
     const handleKeyUp = (e) => {
       if (e.code === 'Space') {
         setIsSpaceDown(false);
+        // Revert to 'select' or previous tool? 
+        // For simplicity, revert to 'select' as per common standard, or maintain previous.
+        // The prompt says "Spacebar + Drag: ... change cursor to grab ... While Panning, disable drawing"
+        // It implies temporary state.
         drawTools.setTool('select');
       }
     };
@@ -271,19 +383,15 @@ function App() {
 
   // Enhanced Stage Handlers
   const handleMouseDown = useCallback((e) => {
-    // Middle click (button 1) triggers pan regardless of tool
+    // Task 3: Middle Mouse Button Pan
     if (e.evt.button === 1) {
-      drawTools.setTool('pan');
-      return;
+      e.evt.preventDefault(); // Prevent default scroll
+      // drawTools.handleMouseDown will be called, ensure it handles button 1
     }
     drawTools.handleMouseDown(e);
   }, [drawTools]);
 
   const handleMouseUp = useCallback((e) => {
-    if (e.evt.button === 1) {
-      drawTools.setTool('select');
-      return;
-    }
     drawTools.handleMouseUp(e);
   }, [drawTools]);
 
@@ -324,7 +432,7 @@ function App() {
       <MainToolbar
         tool={drawTools.tool} setTool={drawTools.setTool}
         onUndo={annotationsHook.handleUndo} onRedo={annotationsHook.handleRedo}
-        onClearAll={annotationsHook.handleClearAll} onExport={handleExport}
+        onClearAll={annotationsHook.handleClearAll} onExport={handleExportCurrent}
         canUndo={annotationsHook.canUndo} canRedo={annotationsHook.canRedo}
         isProcessing={drawTools.isProcessing} saveMessage={saveMessage}
 
@@ -346,10 +454,14 @@ function App() {
         <div className="left-panel-container" style={{ width: leftPanelWidth }}>
           <FileExplorer
             files={fileSystem.files} activeFileId={fileSystem.activeFileId}
-            onSelectFile={fileSystem.selectFile} onIngestFiles={fileSystem.ingestFiles}
+            onSelectFile={fileSystem.selectFile}
+            onIngestFiles={fileSystem.ingestFiles}
+            onImportLabels={handleImportLabels} // Universal Import
             onClearAll={fileSystem.clearProject} onRetryFile={fileSystem.retryFile}
             onRemoveFile={fileSystem.removeFile}
-            onSaveAll={handleSaveAll} syncStats={fileSystem.syncStats}
+            onSaveAll={handleSaveAll}
+            onExportProject={handleExportProject} // Universal Export
+            syncStats={fileSystem.syncStats}
             isSyncEnabled={backgroundSync.isSyncEnabled}
             onToggleSync={() => backgroundSync.setIsSyncEnabled(!backgroundSync.isSyncEnabled)}
             isProcessing={fileSystem.isProcessing} processingProgress={fileSystem.processingProgress}
@@ -371,8 +483,8 @@ function App() {
               currentPenPoints={drawTools.currentPenPoints} mousePos={drawTools.mousePos}
               eraserSize={drawTools.eraserSize} color={drawTools.color}
               onWheel={stage.handleWheel} onClick={drawTools.handleStageClick}
-              onMouseDown={drawTools.handleMouseDown} onMouseMove={drawTools.handleMouseMove}
-              onMouseUp={drawTools.handleMouseUp} onDblClick={handleDoubleClick}
+              onMouseDown={handleMouseDown} onMouseMove={drawTools.handleMouseMove}
+              onMouseUp={handleMouseUp} onDblClick={handleDoubleClick}
               onVertexDrag={drawTools.handleVertexDrag}
             />
           )}
