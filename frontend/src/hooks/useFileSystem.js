@@ -204,24 +204,140 @@ export function useFileSystem() {
     }, []);
 
     /**
-     * Ingest files from user input (drag-drop or file picker).
+     * Helper: Read file as text
      */
-    const ingestFiles = useCallback(async (fileList) => {
-        if (!workerRef.current || fileList.length === 0) return;
+    const readFileAsText = (file) => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = (e) => reject(new Error(`Failed to read ${file.name}`));
+            reader.readAsText(file);
+        });
+    };
+
+    /**
+     * Robust Ingestion Helper
+     * 1. Separates images vs labels
+     * 2. Sends images + single-file labels to Worker (efficient processing & pairing)
+     * 3. Processes Batch labels (JSON/XML) in Main Thread
+     */
+    const ingestHelper = useCallback(async (fileList) => {
+        if (!workerRef.current || !fileList || fileList.length === 0) return;
 
         setIsProcessing(true);
         setError(null);
-        setProcessingProgress({ processed: 0, total: fileList.length, phase: 'processing' });
 
-        // Convert FileList to array for Web Worker
         const filesArray = Array.from(fileList);
+        const images = [];
+        const singleLabels = [];
+        const batchLabels = [];
 
-        // Send to Web Worker for processing
-        workerRef.current.postMessage({
-            type: 'PROCESS_FILES',
-            payload: { files: filesArray }
-        });
+        // Helper to extract path
+        const getFilePath = (file) => {
+            let p = file.webkitRelativePath || file.path || file.name;
+            if (typeof p === 'string' && p.startsWith('/')) p = p.substring(1);
+            return p;
+        };
+
+        // 1. Analyze and Sort Files
+        for (const file of filesArray) {
+            const filePath = getFilePath(file);
+
+            // Check for image types
+            if (file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(file.name)) {
+                images.push({ file, _customPath: filePath });
+                continue;
+            }
+
+            // Check for label types
+            if (/\.(json|xml|txt)$/i.test(file.name)) {
+                if (file.name.toLowerCase().endsWith('.txt')) {
+                    singleLabels.push({ file, _customPath: filePath });
+                } else {
+                    try {
+                        const text = await readFileAsText(file);
+                        const AnnotationConverter = (await import('../utils/annotationConverter')).AnnotationConverter;
+                        const format = AnnotationConverter.detectFormat(text);
+
+                        if (['coco', 'toon-batch', 'voc-aggregated', 'yolo-aggregated'].includes(format)) {
+                            batchLabels.push({ file, content: text, format, path: filePath });
+                        } else {
+                            singleLabels.push({ file, _customPath: filePath });
+                        }
+                    } catch (e) {
+                        console.warn(`Failed to analyze ${file.name}, treating as single/ignored.`);
+                        singleLabels.push({ file, _customPath: filePath });
+                    }
+                }
+            }
+        }
+
+        const total = images.length + singleLabels.length + batchLabels.length;
+        setProcessingProgress({ processed: 0, total, phase: 'analyzing' });
+
+        // 2. Send Images & Single Labels to Worker
+        if (images.length > 0 || singleLabels.length > 0) {
+            workerRef.current.postMessage({
+                type: 'PROCESS_FILES',
+                payload: { files: [...images, ...singleLabels] }
+            });
+        }
+
+        // 3. Process Batch Labels (Main Thread)
+        if (batchLabels.length > 0) {
+            const AnnotationConverter = (await import('../utils/annotationConverter')).AnnotationConverter;
+
+            let processedCount = 0;
+            for (const item of batchLabels) {
+                try {
+                    const projectImages = await db.files.toArray();
+                    const result = AnnotationConverter.parseAnnotations(item.content, projectImages, item.format);
+
+                    for (const [imageName, anns] of Object.entries(result.annotations)) {
+                        const existing = await db.files.where('name').equals(imageName).first();
+
+                        const toonData = AnnotationConverter.internalToToon(anns, {
+                            name: imageName, width: 800, height: 600
+                        });
+
+                        if (existing) {
+                            await db.files.update(existing.id, {
+                                label_data: toonData,
+                                status: existing.blob ? FileStatus.PENDING : FileStatus.MISSING_IMAGE
+                            });
+                        } else {
+                            await db.files.add({
+                                name: imageName,
+                                baseName: imageName.replace(/\.[^/.]+$/, ""),
+                                path: item.path || '', // Use the label file's path for grouping if needed
+                                type: 'image',
+                                blob: null,
+                                thumbnail: null,
+                                label_data: toonData,
+                                status: FileStatus.MISSING_IMAGE,
+                                created_at: new Date().toISOString()
+                            });
+                        }
+                    }
+                    processedCount++;
+                } catch (err) {
+                    console.error(`Batch process failed for ${item.file.name}:`, err);
+                    setError(`Batch import failed: ${err.message}`);
+                }
+            }
+
+            if (images.length === 0 && singleLabels.length === 0) {
+                setIsProcessing(false);
+                setProcessingProgress({ processed: 0, total: 0 });
+            }
+        }
+
     }, []);
+
+    // Deprecate direct ingestFiles in favor of one that logs or redirects?
+    // For now, let's keep ingestFiles as an alias or direct worker access if needed, 
+    // but the UI will use ingestHelper.
+    const ingestFiles = ingestHelper;
 
     /**
      * Select a file to display on canvas.
@@ -290,26 +406,29 @@ export function useFileSystem() {
             status: FileStatus.PENDING // Mark as pending for re-sync
         });
 
-    }, [activeFileId, classNames, activeFileData]);
+    }, [activeFileId, classNames]);
 
     /**
-     * Update annotations for ANY file by ID (Used by Snapshot Import)
+     * Update annotations for any file by ID.
      */
     const updateFileAnnotations = useCallback(async (fileId, annotations) => {
-        const file = await db.files.get(fileId);
+        const file = await getFile(fileId);
         if (!file) return;
 
-        const labelData = serializeAnnotations(annotations, 'yolo', classNames, file.width, file.height);
+        // Convert annotations to TOON format for storage
+        const AnnotationConverter = (await import('../utils/annotationConverter')).AnnotationConverter;
+        const labelData = AnnotationConverter.internalToToon(annotations, {
+            name: file.name,
+            width: file.width || 800,
+            height: file.height || 600
+        });
 
         await updateFile(fileId, {
             label_data: labelData,
             status: FileStatus.PENDING
         });
-    }, [classNames]);
+    }, []);
 
-    /**
-     * Delete a file from the system.
-     */
     /**
      * Retry a failed sync
      */
@@ -373,6 +492,53 @@ export function useFileSystem() {
         return { pending, syncing, synced, total };
     }, [], { pending: 0, syncing: 0, synced: 0, total: 0 });
 
+    /**
+     * Save Project to Backend (dataset/)
+     */
+    const saveProjectToBackend = useCallback(async (enableAugmentation = false) => {
+        setIsProcessing(true);
+        setProcessingProgress({ processed: 0, total: 0, phase: 'saving' });
+        try {
+            const files = await db.files.toArray();
+            let count = 0;
+            const total = files.length;
+            const axios = (await import('axios')).default;
+
+            for (const file of files) {
+                if (!file.blob || !(file.blob instanceof Blob)) continue;
+
+                const formData = new FormData();
+                formData.append('file', file.blob, file.name);
+                formData.append('image_name', file.name);
+                formData.append('augmentation', enableAugmentation ? 'true' : 'false');
+
+                let anns = [];
+                if (file.label_data) {
+                    const AnnotationConverter = (await import('../utils/annotationConverter')).AnnotationConverter;
+                    // Use helper we know exists in scope from module logic
+                    const internal = parseLabelData(file.label_data, classNames, file.width, file.height);
+                    if (internal) {
+                        anns = internal.map(a => ({
+                            label: a.label,
+                            points: a.points
+                        }));
+                    }
+                }
+                formData.append('annotations', JSON.stringify(anns));
+
+                await axios.post('/api/save', formData);
+                count++;
+                setProcessingProgress({ processed: count, total, phase: 'saving' });
+            }
+            setIsProcessing(false);
+            return { success: true, count };
+        } catch (err) {
+            console.error(err);
+            setIsProcessing(false);
+            return { success: false, error: err.message };
+        }
+    }, [classNames]);
+
     return {
         // State
         files,
@@ -385,6 +551,7 @@ export function useFileSystem() {
         error,
 
         // Actions
+        saveProjectToBackend,
         ingestFiles,
         clearProject,
         retryFile,
@@ -447,7 +614,10 @@ async function renameClass(oldName, newName, classNames, setClassNames) {
 function parseLabelData(labelData, classNames, imgWidth = 0, imgHeight = 0) {
     if (!labelData) return [];
 
-    const lines = labelData.trim().split('\n').filter(l => !l.startsWith('#') && l.trim());
+    // Ensure string
+    const dataStr = typeof labelData === 'string' ? labelData : JSON.stringify(labelData);
+
+    const lines = dataStr.trim().split('\n').filter(l => !l.startsWith('#') && l.trim());
 
     return lines.map((line, idx) => {
         const parts = line.trim().split(/\s+/);

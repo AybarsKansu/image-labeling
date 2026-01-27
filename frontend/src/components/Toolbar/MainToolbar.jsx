@@ -46,7 +46,8 @@ const MainToolbar = ({
     // NEW: Load/Export handlers
     onLoadAnnotations,
     onExport,
-    onOpenEvaluation, // Action to open evaluation dashboard
+    onExportCurrent, // NEW: Export current image only
+
 
     // Status
     isProcessing,
@@ -139,6 +140,13 @@ const MainToolbar = ({
     const handleExportClick = (format) => {
         if (onExport) {
             onExport(format);
+        }
+        setIsExportExpanded(false);
+    };
+
+    const handleExportCurrentClick = (format) => {
+        if (onExportCurrent) {
+            onExportCurrent(format);
         }
         setIsExportExpanded(false);
     };
@@ -386,11 +394,12 @@ const MainToolbar = ({
                     </button>
 
                     <div className={`export-dropdown-menu ${isExportExpanded ? 'visible' : ''}`}>
+                        <div className="dropdown-section-label">📤 Export Current Image</div>
                         {exportFormats.map(f => (
                             <button
-                                key={f.id}
+                                key={`current-${f.id}`}
                                 className="dropdown-item"
-                                onClick={() => handleExportClick(f.id)}
+                                onClick={() => handleExportCurrentClick(f.id)}
                             >
                                 {f.label}
                             </button>
@@ -419,14 +428,7 @@ const MainToolbar = ({
                     Train Model
                 </button>
 
-                <button
-                    className="toolbar-btn"
-                    onClick={onOpenEvaluation}
-                    title="Evaluation Dashboard"
-                    style={{ background: '#7c3aed' }}
-                >
-                    📊 Benchmark
-                </button>
+
             </div>
 
             {/* Save Message */}

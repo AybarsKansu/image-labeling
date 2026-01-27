@@ -519,6 +519,560 @@ ${objectElements.join('\n')}
         const coco = this.toonToCoco(toonData);
         return this.cocoToInternal(coco);
     }
+
+    // ============================================
+    // FORMAT AUTO-DETECTION
+    // ============================================
+
+    /**
+     * Detect annotation format from file content
+     * @param {string} content - Raw file content
+     * @returns {string} Format type: 'coco' | 'toon' | 'voc' | 'voc-aggregated' | 'yolo' | 'yolo-aggregated' | 'unknown'
+     */
+    static detectFormat(content) {
+        const trimmed = content.trim();
+
+        // Check for XML formats
+        if (trimmed.startsWith('<?xml') || trimmed.startsWith('<')) {
+            if (trimmed.includes('<Dataset>') || trimmed.includes('<dataset>')) {
+                return 'voc-aggregated';
+            }
+            if (trimmed.includes('<annotation>') || trimmed.includes('<Annotation>')) {
+                return 'voc';
+            }
+            return 'unknown';
+        }
+
+        // Check for JSON formats
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+            try {
+                const json = JSON.parse(trimmed);
+                // TOON format check
+                if (json.v && json.d && json.c) {
+                    // Check if multi-image TOON
+                    if (Array.isArray(json.images)) return 'toon-batch';
+                    return 'toon';
+                }
+                // COCO format check
+                if (json.images && json.annotations && json.categories) {
+                    return 'coco';
+                }
+                return 'unknown';
+            } catch {
+                return 'unknown';
+            }
+        }
+
+        // Check for YOLO text formats
+        const lines = trimmed.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+        if (lines.length > 0) {
+            const firstLine = lines[0].trim();
+            const parts = firstLine.split(/\s+/);
+            const firstToken = parts[0];
+
+            // Standard YOLO: starts with class_id (integer)
+            // e.g. "0 0.5 0.5 0.2 0.2"
+            if (!isNaN(parseInt(firstToken)) && String(parseInt(firstToken)) === firstToken && parts.length >= 5) {
+                return 'yolo';
+            }
+
+            // Aggregated YOLO: first part contains path separator (/) or file extension, IS NOT a pure number
+            // e.g. "image.jpg 0 0.1 0.1..." or "data/img.png 1 ..."
+            if (isNaN(parseInt(firstToken)) && (firstToken.includes('/') || firstToken.includes('.'))) {
+                return 'yolo-aggregated';
+            }
+        }
+
+        return 'unknown';
+    }
+
+    // ============================================
+    // AGGREGATED YOLO (Manifest Style)
+    // ============================================
+
+    /**
+     * Parse Aggregated YOLO manifest format
+     * Format: relative_path/image.jpg class_id x_center y_center width height ...
+     * @param {string} yoloText - Manifest style YOLO content
+     * @param {Array} projectImages - Array of {name, width, height} for project images
+     * @returns {Object} { annotations: {'image_name': [anns]}, categories: [], orphans: [] }
+     */
+    static parseAggregatedYolo(yoloText, projectImages = []) {
+        if (typeof yoloText !== 'string') {
+            throw new Error('Invalid input: YOLO content must be a string.');
+        }
+
+        const lines = yoloText.trim().split('\n');
+        const annotations = {};
+        const orphans = [];
+        let classNames = [];
+
+        // Build image lookup by name
+        const imageMap = new Map();
+        projectImages.forEach(img => {
+            const name = img.name || img.file_name;
+            imageMap.set(name, { width: img.width || 1, height: img.height || 1 });
+        });
+
+        // Extract class names from metadata comment
+        const metadataLine = lines.find(l => l.startsWith('# classes:'));
+        if (metadataLine) {
+            classNames = metadataLine.replace('# classes:', '').trim().split(',').map(c => c.trim());
+        }
+
+        // Parse annotation lines
+        lines.filter(l => l.trim() && !l.startsWith('#')).forEach(line => {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length < 6) return; // Need at least: path class_id x y w h
+
+            // Extract image path/name from first part
+            const imagePath = parts[0];
+            const imageName = imagePath.split('/').pop(); // Get filename from path
+            const classId = parseInt(parts[1]);
+            const coords = parts.slice(2).map(parseFloat);
+
+            if (isNaN(classId) || coords.some(isNaN)) return;
+
+            // Check if image exists in project
+            const imageInfo = imageMap.get(imageName);
+            if (!imageInfo) {
+                if (!orphans.includes(imageName)) {
+                    orphans.push(imageName);
+                    console.warn(`[FormatConverter] Skipping orphan annotations for: ${imageName}`);
+                }
+                return;
+            }
+
+            // Initialize annotation array for this image
+            if (!annotations[imageName]) {
+                annotations[imageName] = [];
+            }
+
+            // Denormalize coordinates
+            const { width, height } = imageInfo;
+            const points = [];
+            for (let i = 0; i < coords.length; i += 2) {
+                points.push(coords[i] * width);
+                points.push(coords[i + 1] * height);
+            }
+
+            // Get class name
+            const label = classNames[classId] || `class_${classId}`;
+
+            annotations[imageName].push({
+                id: `${imageName}_${annotations[imageName].length}`,
+                type: 'poly',
+                label,
+                points,
+                originalRawPoints: points
+            });
+        });
+
+        return { annotations, categories: classNames, orphans };
+    }
+
+    /**
+     * Generate Aggregated YOLO manifest format
+     * @param {Array} imagesData - Array of { file: {name, width, height}, annotations: [] }
+     * @returns {string} Manifest YOLO text content
+     */
+    static generateAggregatedYolo(imagesData) {
+        // Build global category list from all annotations
+        const categorySet = new Set();
+        imagesData.forEach(({ annotations }) => {
+            annotations.forEach(ann => {
+                if (ann.label) categorySet.add(ann.label);
+            });
+        });
+        const categories = Array.from(categorySet);
+        const catToIdx = new Map(categories.map((c, i) => [c, i]));
+
+        const lines = [];
+
+        imagesData.forEach(({ file, annotations }) => {
+            const { name, width = 1, height = 1 } = file;
+
+            annotations.forEach(ann => {
+                const classIdx = catToIdx.get(ann.label) ?? 0;
+                const points = ann.points || [];
+
+                // Normalize coordinates
+                const normalizedParts = [];
+                for (let i = 0; i < points.length; i += 2) {
+                    const nx = Math.max(0, Math.min(1, points[i] / width));
+                    const ny = Math.max(0, Math.min(1, points[i + 1] / height));
+                    normalizedParts.push(nx.toFixed(6));
+                    normalizedParts.push(ny.toFixed(6));
+                }
+
+                lines.push(`${name} ${classIdx} ${normalizedParts.join(' ')}`);
+            });
+        });
+
+        // Add classes metadata
+        if (categories.length > 0) {
+            lines.push(`# classes: ${categories.join(', ')}`);
+        }
+
+        return lines.join('\n');
+    }
+
+    // ============================================
+    // AGGREGATED PASCAL VOC
+    // ============================================
+
+    /**
+     * Parse Aggregated Pascal VOC XML
+     * @param {string} xmlString - Aggregated VOC XML with <Dataset> root
+     * @param {Array} projectImages - Array of {name, width, height}
+     * @returns {Object} { annotations: {'image_name': [anns]}, categories: [], orphans: [] }
+     */
+    static parseAggregatedVoc(xmlString, projectImages = []) {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xmlString, 'text/xml');
+
+        const parseError = doc.querySelector('parsererror');
+        if (parseError) {
+            throw new Error('Invalid XML format: ' + parseError.textContent);
+        }
+
+        // Build image lookup
+        const imageMap = new Map();
+        projectImages.forEach(img => {
+            const name = img.name || img.file_name;
+            imageMap.set(name, { width: img.width || 0, height: img.height || 0 });
+        });
+
+        const annotations = {};
+        const orphans = [];
+        const categorySet = new Set();
+
+        // Find all Annotation nodes (case-insensitive)
+        const annotationNodes = doc.querySelectorAll('Annotation, annotation');
+
+        annotationNodes.forEach(annNode => {
+            const filename = annNode.querySelector('filename')?.textContent ||
+                annNode.querySelector('Filename')?.textContent || '';
+
+            if (!filename) return;
+
+            // Check if image exists in project
+            if (!imageMap.has(filename)) {
+                if (!orphans.includes(filename)) {
+                    orphans.push(filename);
+                    console.warn(`[FormatConverter] Skipping orphan annotations for: ${filename}`);
+                }
+                return;
+            }
+
+            const imgInfo = imageMap.get(filename);
+            if (!annotations[filename]) {
+                annotations[filename] = [];
+            }
+
+            // Parse objects
+            const objects = annNode.querySelectorAll('object');
+            objects.forEach((obj, idx) => {
+                const name = obj.querySelector('name')?.textContent || 'unknown';
+                categorySet.add(name);
+
+                const bndbox = obj.querySelector('bndbox');
+                const xmin = parseFloat(bndbox?.querySelector('xmin')?.textContent) || 0;
+                const ymin = parseFloat(bndbox?.querySelector('ymin')?.textContent) || 0;
+                const xmax = parseFloat(bndbox?.querySelector('xmax')?.textContent) || 0;
+                const ymax = parseFloat(bndbox?.querySelector('ymax')?.textContent) || 0;
+
+                // Convert bbox to polygon (4 corners)
+                const points = [xmin, ymin, xmax, ymin, xmax, ymax, xmin, ymax];
+
+                annotations[filename].push({
+                    id: `${filename}_${idx}`,
+                    type: 'poly',
+                    label: name,
+                    points,
+                    originalRawPoints: points
+                });
+            });
+        });
+
+        return { annotations, categories: Array.from(categorySet), orphans };
+    }
+
+    /**
+     * Generate Aggregated Pascal VOC XML
+     * @param {Array} imagesData - Array of { file: {name, width, height}, annotations: [] }
+     * @returns {string} Aggregated VOC XML content
+     */
+    static generateAggregatedVoc(imagesData) {
+        const annotationElements = imagesData.map(({ file, annotations }) => {
+            const { name, width = 0, height = 0 } = file;
+
+            const objectElements = annotations.map(ann => {
+                const points = ann.points || [];
+
+                // Calculate bounding box from polygon points
+                let xmin = Infinity, ymin = Infinity, xmax = -Infinity, ymax = -Infinity;
+                for (let i = 0; i < points.length; i += 2) {
+                    xmin = Math.min(xmin, points[i]);
+                    xmax = Math.max(xmax, points[i]);
+                    ymin = Math.min(ymin, points[i + 1]);
+                    ymax = Math.max(ymax, points[i + 1]);
+                }
+
+                // Clamp to image bounds
+                xmin = Math.max(0, Math.round(xmin));
+                ymin = Math.max(0, Math.round(ymin));
+                xmax = Math.min(width, Math.round(xmax));
+                ymax = Math.min(height, Math.round(ymax));
+
+                return `    <object>
+      <name>${escapeXml(ann.label || 'unknown')}</name>
+      <pose>Unspecified</pose>
+      <truncated>0</truncated>
+      <difficult>0</difficult>
+      <bndbox>
+        <xmin>${xmin}</xmin>
+        <ymin>${ymin}</ymin>
+        <xmax>${xmax}</xmax>
+        <ymax>${ymax}</ymax>
+      </bndbox>
+    </object>`;
+            });
+
+            return `  <Annotation>
+    <folder>images</folder>
+    <filename>${escapeXml(name)}</filename>
+    <size>
+      <width>${width}</width>
+      <height>${height}</height>
+      <depth>3</depth>
+    </size>
+    <segmented>0</segmented>
+${objectElements.join('\n')}
+  </Annotation>`;
+        });
+
+        return `<?xml version="1.0" encoding="UTF-8"?>
+<Dataset>
+${annotationElements.join('\n')}
+</Dataset>`;
+    }
+
+    // ============================================
+    // BATCH COCO (Multi-Image)
+    // ============================================
+
+    /**
+     * Parse batch COCO format (multiple images)
+     * @param {Object} cocoData - COCO JSON with multiple images
+     * @param {Array} projectImages - Array of {name, width, height}
+     * @returns {Object} { annotations: {'image_name': [anns]}, categories: [], orphans: [] }
+     */
+    static parseBatchCoco(cocoData, projectImages = []) {
+        if (!cocoData || typeof cocoData !== 'object') {
+            throw new Error('Invalid COCO data');
+        }
+
+        // Build image lookup from project
+        const projectImageMap = new Map();
+        projectImages.forEach(img => {
+            projectImageMap.set(img.name || img.file_name, img);
+        });
+
+        // Build image_id to filename map from COCO
+        const imageIdToName = new Map();
+        (cocoData.images || []).forEach(img => {
+            imageIdToName.set(img.id, img.file_name);
+        });
+
+        // Build category id to name map
+        const catIdToName = new Map();
+        (cocoData.categories || []).forEach(cat => {
+            catIdToName.set(cat.id, cat.name);
+        });
+
+        const annotations = {};
+        const orphans = [];
+
+        (cocoData.annotations || []).forEach(ann => {
+            const imageName = imageIdToName.get(ann.image_id);
+            if (!imageName) return;
+
+            // Check if image exists in project
+            if (!projectImageMap.has(imageName)) {
+                if (!orphans.includes(imageName)) {
+                    orphans.push(imageName);
+                    console.warn(`[FormatConverter] Skipping orphan annotations for: ${imageName}`);
+                }
+                return;
+            }
+
+            if (!annotations[imageName]) {
+                annotations[imageName] = [];
+            }
+
+            annotations[imageName].push({
+                id: String(ann.id),
+                type: 'poly',
+                label: catIdToName.get(ann.category_id) || 'unknown',
+                points: ann.segmentation?.[0] || [],
+                originalRawPoints: ann.segmentation?.[0] || []
+            });
+        });
+
+        return {
+            annotations,
+            categories: Array.from(catIdToName.values()),
+            orphans
+        };
+    }
+
+    /**
+     * Generate batch COCO format (multiple images)
+     * @param {Array} imagesData - Array of { file: {name, width, height}, annotations: [] }
+     * @returns {Object} COCO JSON object
+     */
+    static generateBatchCoco(imagesData) {
+        // Build global category map
+        const categoryMap = new Map();
+        imagesData.forEach(({ annotations }) => {
+            annotations.forEach(ann => {
+                const label = ann.label || 'unknown';
+                if (!categoryMap.has(label)) {
+                    categoryMap.set(label, categoryMap.size + 1);
+                }
+            });
+        });
+
+        const categories = Array.from(categoryMap.entries()).map(([name, id]) => ({ id, name }));
+        const images = [];
+        const cocoAnnotations = [];
+        let annId = 1;
+
+        imagesData.forEach(({ file, annotations }, imgIdx) => {
+            const imageId = imgIdx + 1;
+            images.push({
+                id: imageId,
+                file_name: file.name,
+                width: file.width || 0,
+                height: file.height || 0
+            });
+
+            annotations.forEach(ann => {
+                const points = ann.points || [];
+
+                // Calculate bbox
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                for (let i = 0; i < points.length; i += 2) {
+                    minX = Math.min(minX, points[i]);
+                    maxX = Math.max(maxX, points[i]);
+                    minY = Math.min(minY, points[i + 1]);
+                    maxY = Math.max(maxY, points[i + 1]);
+                }
+
+                cocoAnnotations.push({
+                    id: annId++,
+                    image_id: imageId,
+                    category_id: categoryMap.get(ann.label || 'unknown'),
+                    segmentation: [points],
+                    bbox: [minX, minY, maxX - minX, maxY - minY],
+                    area: (maxX - minX) * (maxY - minY),
+                    iscrowd: 0
+                });
+            });
+        });
+
+        return { images, annotations: cocoAnnotations, categories };
+    }
+
+    // ============================================
+    // BATCH TOON (Multi-Image)
+    // ============================================
+
+    /**
+     * Parse batch TOON format (multiple images)
+     * @param {Object} toonData - Multi-image TOON format
+     * @param {Array} projectImages - Array of {name, width, height}
+     * @returns {Object} { annotations: {'image_name': [anns]}, categories: [], orphans: [] }
+     */
+    static parseBatchToon(toonData, projectImages = []) {
+        if (!toonData?.images || !Array.isArray(toonData.images)) {
+            throw new Error('Invalid batch TOON format: Missing images array');
+        }
+
+        // Build project image lookup
+        const projectImageMap = new Map();
+        projectImages.forEach(img => {
+            projectImageMap.set(img.name || img.file_name, img);
+        });
+
+        const categories = toonData.c || [];
+        const annotations = {};
+        const orphans = [];
+
+        toonData.images.forEach(imgData => {
+            const [fileName, width, height] = imgData.m || ['image.jpg', 0, 0];
+            const data = imgData.d || [];
+
+            // Check if image exists in project
+            if (!projectImageMap.has(fileName)) {
+                if (!orphans.includes(fileName)) {
+                    orphans.push(fileName);
+                    console.warn(`[FormatConverter] Skipping orphan annotations for: ${fileName}`);
+                }
+                return;
+            }
+
+            annotations[fileName] = data.map((item, idx) => {
+                const [catIdx, points] = item;
+                return {
+                    id: `${fileName}_${idx}`,
+                    type: 'poly',
+                    label: categories[catIdx] || 'unknown',
+                    points: points || [],
+                    originalRawPoints: points || []
+                };
+            });
+        });
+
+        return { annotations, categories, orphans };
+    }
+
+    /**
+     * Generate batch TOON format (multiple images)
+     * @param {Array} imagesData - Array of { file: {name, width, height}, annotations: [] }
+     * @returns {Object} Batch TOON JSON object
+     */
+    static generateBatchToon(imagesData) {
+        // Build global category list
+        const categorySet = new Set();
+        imagesData.forEach(({ annotations }) => {
+            annotations.forEach(ann => {
+                if (ann.label) categorySet.add(ann.label);
+            });
+        });
+        const categories = Array.from(categorySet);
+        const catToIdx = new Map(categories.map((c, i) => [c, i]));
+
+        const images = imagesData.map(({ file, annotations }) => {
+            const data = annotations.map(ann => {
+                const catIdx = catToIdx.get(ann.label) ?? 0;
+                const points = (ann.points || []).map(p => Math.round(p * 100) / 100);
+                return [catIdx, points];
+            });
+
+            return {
+                m: [file.name, file.width || 0, file.height || 0],
+                d: data
+            };
+        });
+
+        return {
+            v: '1.0',
+            c: categories,
+            images
+        };
+    }
 }
 
 // Helper: Escape XML special characters

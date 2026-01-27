@@ -4,55 +4,90 @@ import { useDropzone } from 'react-dropzone';
 import { FileStatus } from '../../db/index';
 import './FileExplorer.css';
 
-
 const FileExplorer = ({
     files = [],
     activeFileId,
     onSelectFile,
-    onIngestFiles, // Still used for images
-    onImportLabels, // NEW: Handler for label files
+    onIngestFiles,
     onClearAll,
     onRetryFile,
     onRemoveFile,
     onSaveAll,
-    // Export handlers - Now unified
-    onExportProject,
+    onExportProject,    // NEW: Opens export modal
+    onImportLabels,     // NEW: Handler for importing label files
     isSyncEnabled,
     onToggleSync,
     syncStats = { pending: 0, syncing: 0, synced: 0, total: 0 },
     isProcessing = false,
     processingProgress = { processed: 0, total: 0 }
 }) => {
+    const fileInputRef = useRef(null);
+    const folderInputRef = useRef(null);
+    const labelInputRef = useRef(null);
     const [collapsedFolders, setCollapsedFolders] = useState(new Set());
-    const [showExportMenu, setShowExportMenu] = useState(false);
 
-    // --- Dropzone 1: Images Only ---
+    // --- Image Dropzone Logic ---
     const onDropImages = useCallback((acceptedFiles) => {
-        if (acceptedFiles.length > 0) onIngestFiles(acceptedFiles);
+        const images = acceptedFiles.filter(f =>
+            f.type.startsWith('image/') ||
+            /\.(jpg|jpeg|png|webp|gif|bmp)$/i.test(f.name)
+        );
+        if (images.length > 0) onIngestFiles(images);
     }, [onIngestFiles]);
 
-    const { getRootProps: getImageRoot, getInputProps: getImageInput, isDragActive: isImageDrag } = useDropzone({
+    const {
+        getRootProps: getImageRootProps,
+        getInputProps: getImageInputProps,
+        isDragActive: isImageDragActive
+    } = useDropzone({
         onDrop: onDropImages,
-        accept: { 'image/*': ['.jpg', '.jpeg', '.png', '.webp'] },
-        noClick: false,
+        accept: { 'image/*': ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'] },
+        noClick: true,
         noKeyboard: true
     });
 
-    // --- Dropzone 2: Labels (Single File Aggregated) ---
+    // --- Label Dropzone Logic ---
     const onDropLabels = useCallback((acceptedFiles) => {
-        if (acceptedFiles.length > 0) onImportLabels(acceptedFiles[0]); // Only take first file
-    }, [onImportLabels]);
+        const labelFiles = acceptedFiles.filter(f =>
+            /\.(txt|xml|json)$/i.test(f.name)
+        );
+        if (labelFiles.length > 0 && onIngestFiles) {
+            // Pass all files to the unified ingestion handler
+            onIngestFiles(labelFiles);
+        }
+    }, [onIngestFiles]);
 
-    const { getRootProps: getLabelRoot, getInputProps: getLabelInput, isDragActive: isLabelDrag } = useDropzone({
+    const {
+        getRootProps: getLabelRootProps,
+        getInputProps: getLabelInputProps,
+        isDragActive: isLabelDragActive
+    } = useDropzone({
         onDrop: onDropLabels,
         accept: {
-            'application/json': ['.json'],
             'text/plain': ['.txt'],
-            'text/xml': ['.xml']
+            'application/xml': ['.xml'],
+            'application/json': ['.json']
         },
-        noClick: false,
-        noKeyboard: true
+        noClick: true,
+        noKeyboard: true,
+        multiple: true // Enable multiple files
     });
+
+    const handleImageSelect = (e) => {
+        const selected = Array.from(e.target.files || []).filter(f =>
+            f.type.startsWith('image/')
+        );
+        if (selected.length > 0) onIngestFiles(selected);
+        e.target.value = '';
+    };
+
+    const handleLabelSelect = (e) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length > 0 && onIngestFiles) {
+            onIngestFiles(files);
+        }
+        e.target.value = '';
+    };
 
     const toggleFolder = (path) => {
         setCollapsedFolders(prev => {
@@ -68,10 +103,10 @@ const FileExplorer = ({
         const flatList = [];
         const folders = {};
 
-        // 1. Group by directory path
         files.forEach(file => {
             const parts = file.path ? file.path.split('/') : [];
             const dirPath = parts.slice(0, -1).join('/') || 'Root';
+
             if (!folders[dirPath]) folders[dirPath] = [];
             folders[dirPath].push(file);
         });
@@ -80,6 +115,7 @@ const FileExplorer = ({
 
         sortedPaths.forEach(path => {
             const isCollapsed = collapsedFolders.has(path);
+
             flatList.push({
                 type: 'folder',
                 path: path,
@@ -90,7 +126,10 @@ const FileExplorer = ({
 
             if (!isCollapsed) {
                 folders[path].forEach(file => {
-                    flatList.push({ type: 'file', data: file });
+                    flatList.push({
+                        type: 'file',
+                        data: file
+                    });
                 });
             }
         });
@@ -98,14 +137,24 @@ const FileExplorer = ({
         return flatList;
     }, [files, collapsedFolders]);
 
+    // Calculate annotation count for export stats
+    const annotationCount = useMemo(() => {
+        return files.reduce((sum, file) => {
+            const labelData = file.label_data;
+            if (labelData?.d) return sum + labelData.d.length;
+            return sum;
+        }, 0);
+    }, [files]);
+
     const syncPercent = syncStats.total > 0 ? Math.round((syncStats.synced / syncStats.total) * 100) : 0;
 
     return (
         <div className="file-explorer">
+            {/* Header */}
             <div className="explorer-header">
                 <div>
                     <h3>📁 Explorer</h3>
-                    <div className="file-count">{files.length} items</div>
+                    <div className="file-count">{files.length} images • {annotationCount} labels</div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                     <button
@@ -126,19 +175,34 @@ const FileExplorer = ({
             </div>
 
             {/* Split Upload Zones */}
-            <div className="upload-group">
-                <div {...getImageRoot()} className={`upload-zone ${isImageDrag ? 'active' : ''}`}>
-                    <input {...getImageInput()} />
-                    <div className="upload-zone-label"><span>🖼️</span> Add Images</div>
-                    <div className="upload-zone-sub">Drag & drop images</div>
+            <div className="upload-section">
+                <div
+                    className={`upload-zone images ${isImageDragActive ? 'drag-active' : ''}`}
+                    {...getImageRootProps()}
+                    onClick={() => fileInputRef.current?.click()}
+                >
+                    <input {...getImageInputProps()} />
+                    <input ref={fileInputRef} type="file" multiple accept="image/*" onChange={handleImageSelect} style={{ display: 'none' }} />
+                    <input ref={folderInputRef} type="file" webkitdirectory="" directory="" multiple onChange={handleImageSelect} style={{ display: 'none' }} />
+                    <span className="upload-icon">🖼️</span>
+                    <span className="upload-text">Add Images</span>
+                    <span className="upload-hint">Drop files or folders</span>
                 </div>
 
-                <div {...getLabelRoot()} className={`upload-zone ${isLabelDrag ? 'active' : ''}`}>
-                    <input {...getLabelInput()} />
-                    <div className="upload-zone-label"><span>📝</span> Import Labels</div>
-                    <div className="upload-zone-sub">Single file (.txt, .xml, .json)</div>
+                <div
+                    className={`upload-zone labels ${isLabelDragActive ? 'drag-active' : ''}`}
+                    {...getLabelRootProps()}
+                    onClick={() => labelInputRef.current?.click()}
+                >
+                    <input {...getLabelInputProps()} />
+                    <input ref={labelInputRef} type="file" multiple accept=".txt,.xml,.json" onChange={handleLabelSelect} style={{ display: 'none' }} />
+                    <span className="upload-icon">📋</span>
+                    <span className="upload-text">Import Labels</span>
+                    <span className="upload-hint">.txt .xml .json</span>
                 </div>
             </div>
+
+
 
             {/* Status Bars */}
             {isProcessing && (
@@ -159,13 +223,17 @@ const FileExplorer = ({
                 </div>
             )}
 
+            {/* Drag Overlay */}
+            {(isImageDragActive || isLabelDragActive) && (
+                <div className="drag-overlay">
+                    <span>{isLabelDragActive ? '📋 Drop labels file' : '📥 Drop images'}</span>
+                </div>
+            )}
+
             {/* Virtual Tree List */}
             <div className="file-list-container">
                 {files.length === 0 ? (
-                    <div className="empty-state" style={{ padding: '20px', textAlign: 'center', color: '#666', fontSize: '12px' }}>
-                        <p>No files loaded.</p>
-                        <p>Use the buttons above to start.</p>
-                    </div>
+                    <div className="empty-state"><p>Drop files or folders to start</p></div>
                 ) : (
                     <Virtuoso
                         style={{ height: '100%' }}
@@ -186,6 +254,7 @@ const FileExplorer = ({
 
                             const { data: file } = item;
                             const isActive = file.id === activeFileId;
+                            const statusIcon = getStatusIcon(file.status);
                             const hasError = file.status === FileStatus.ERROR;
                             const isSynced = file.status === FileStatus.SYNCED;
 
@@ -212,9 +281,8 @@ const FileExplorer = ({
                                                     e.stopPropagation();
                                                     if (window.confirm(`Remove ${file.name}?`)) onRemoveFile(file.id);
                                                 }}
-                                                title="Delete"
                                             >
-                                                🗑️
+                                                ✕
                                             </button>
                                         </div>
                                         <div className="file-meta">
@@ -230,7 +298,7 @@ const FileExplorer = ({
                                                 }}
                                                 className={hasError ? 'retry-trigger' : ''}
                                             >
-                                                {getStatusIcon(file.status)}
+                                                {statusIcon}
                                             </span>
                                             {file.label_data && <span className="label-indicator">📋</span>}
                                         </div>
@@ -242,40 +310,23 @@ const FileExplorer = ({
                 )}
             </div>
 
-            {/* Sticky Footer */}
+            {/* Footer Actions */}
             <div className="explorer-footer">
-                {showExportMenu && (
-                    <div className="export-popover">
-                        <button className="export-option" onClick={() => { onExportProject && onExportProject('yolo_agg'); setShowExportMenu(false); }}>
-                            📋 YOLO (Aggregated .txt)
-                        </button>
-                        <button className="export-option" onClick={() => { onExportProject && onExportProject('voc_agg'); setShowExportMenu(false); }}>
-                            🧩 VOC (Aggregated .xml)
-                        </button>
-                        <button className="export-option" onClick={() => { onExportProject && onExportProject('coco'); setShowExportMenu(false); }}>
-                            🥥 COCO (Standard .json)
-                        </button>
-                        <button className="export-option" onClick={() => { onExportProject && onExportProject('toon'); setShowExportMenu(false); }}>
-                            🎨 Toon (Custom .json)
-                        </button>
-                    </div>
-                )}
-
-                <div className="footer-actions-row">
-                    <button
-                        className="action-btn"
-                        onClick={() => setShowExportMenu(!showExportMenu)}
-                    >
-                        📤 Export Project
-                    </button>
-                    <button
-                        className="action-btn primary"
-                        onClick={() => onSaveAll && onSaveAll()}
-                        disabled={files.length === 0}
-                    >
-                        💾 Save All
-                    </button>
-                </div>
+                <button
+                    className="export-btn"
+                    onClick={onExportProject}
+                    disabled={files.length === 0}
+                    title="Export project annotations"
+                >
+                    📤 Export Project
+                </button>
+                <button
+                    className="save-all-btn"
+                    onClick={() => onSaveAll && onSaveAll()}
+                    disabled={files.length === 0 || syncStats.pending > 0}
+                >
+                    🚀 Save All
+                </button>
             </div>
         </div>
     );

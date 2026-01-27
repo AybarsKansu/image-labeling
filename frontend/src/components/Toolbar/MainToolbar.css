@@ -407,3 +407,19 @@
     justify-content: flex-start;
     font-size: 12px;
 }
+
+/* Dropdown Section Styles */
+.dropdown-section-label {
+    padding: 6px 12px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.dropdown-divider {
+    height: 1px;
+    background: #374151;
+    margin: 4px 0;
+}

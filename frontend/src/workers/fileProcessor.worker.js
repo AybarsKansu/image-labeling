@@ -48,7 +48,11 @@ async function processFiles(files) {
     let classesContent = null;
 
     // Categorize files
-    for (const file of files) {
+    for (const item of files) {
+        const file = item.file || item;
+        // Attach custom path locally if provided in wrapper
+        if (item._customPath) file._customPath = item._customPath;
+
         const ext = file.name.split('.').pop().toLowerCase();
         const baseName = file.name.replace(/\.[^/.]+$/, '');
 
@@ -89,7 +93,7 @@ async function processFiles(files) {
         processedImages.push({
             name: img.file.name,
             baseName: img.baseName,
-            path: img.file.webkitRelativePath || '',
+            path: getPath(img.file),
             type: 'image',
             blob: img.file,
             thumbnail: thumbnail,
@@ -118,7 +122,7 @@ async function processFiles(files) {
         processedLabels.push({
             name: label.file.name,
             baseName: label.baseName,
-            path: label.file.webkitRelativePath || '',
+            path: getPath(label.file),
             type: 'label',
             data: labelText
         });
@@ -135,6 +139,14 @@ async function processFiles(files) {
         labels: processedLabels,
         classNames: classNames
     };
+}
+
+function getPath(file) {
+    // Check for custom path attached in main thread, or standard props
+    // _customPath is our manual override. path is from react-dropzone. webkitRelativePath is standard.
+    let p = file._customPath || file.path || file.webkitRelativePath || '';
+    if (typeof p === 'string' && p.startsWith('/')) p = p.substring(1);
+    return p;
 }
 
 /**

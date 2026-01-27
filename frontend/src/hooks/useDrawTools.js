@@ -112,8 +112,8 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
 
     // --- Mouse Down Handler ---
     const handleMouseDown = useCallback((e) => {
-        // Right Click Pan OR Middle Click Pan (Button 1)
-        if (e.evt.button === 2 || e.evt.button === 1) {
+        // Right Click Pan
+        if (e.evt.button === 2) {
             isRightPanningRef.current = true;
             startPosRef.current = stageRef.current.getPointerPosition();
             stageRef.current.container().style.cursor = 'grabbing';
@@ -132,7 +132,6 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
             if (tool === 'pan') {
                 startPosRef.current = stageRef.current.getPointerPosition();
                 setIsDrawing(true);
-                stageRef.current.container().style.cursor = 'grabbing';
             }
             return;
         }
@@ -157,12 +156,10 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
 
     // --- Mouse Move Handler ---
     const handleMouseMove = useCallback((e) => {
-        // Panning (Tool OR Right-Click OR Middle-Click)
+        // Panning (Tool OR Right-Click)
         if ((isDrawing && tool === 'pan') || isRightPanningRef.current) {
             const stage = stageRef.current;
             const pointer = stage.getPointerPosition();
-            if (!pointer) return;
-
             const start = startPosRef.current;
             const dx = pointer.x - start.x;
             const dy = pointer.y - start.y;

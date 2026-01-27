@@ -1,0 +1,222 @@
+/**
+ * ExportModal Styles
+ */
+
+.export-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.export-modal {
+    background: #1e1e2e;
+    border-radius: 16px;
+    width: 500px;
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.export-modal-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid #2d2d3d;
+    position: relative;
+}
+
+.export-modal-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: #fff;
+}
+
+.export-subtitle {
+    font-size: 0.85rem;
+    color: #888;
+    margin-top: 4px;
+    display: block;
+}
+
+.export-modal-header .close-btn {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    background: transparent;
+    border: none;
+    color: #888;
+    font-size: 1.25rem;
+    cursor: pointer;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.export-modal-header .close-btn:hover {
+    background: #2d2d3d;
+    color: #fff;
+}
+
+.export-modal-body {
+    padding: 20px 24px;
+    overflow-y: auto;
+    max-height: 400px;
+}
+
+.format-grid {
+    display: grid;
+    gap: 12px;
+}
+
+.format-card {
+    display: grid;
+    grid-template-columns: 48px 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 4px 12px;
+    padding: 16px;
+    background: #252535;
+    border: 2px solid transparent;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.format-card:hover {
+    background: #2a2a3f;
+    border-color: #3d3d5c;
+}
+
+.format-card.selected {
+    background: #2a3a4a;
+    border-color: #4a9eff;
+}
+
+.format-icon {
+    grid-row: span 2;
+    font-size: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.format-info {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.format-name {
+    font-weight: 600;
+    color: #fff;
+}
+
+.format-ext {
+    font-size: 0.75rem;
+    color: #666;
+    background: #1a1a2a;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.format-description {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #888;
+    grid-column: 2;
+}
+
+.format-radio {
+    grid-row: span 2;
+    display: flex;
+    align-items: center;
+}
+
+.format-radio input[type="radio"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #4a9eff;
+    cursor: pointer;
+}
+
+.export-modal-footer {
+    padding: 16px 24px;
+    border-top: 1px solid #2d2d3d;
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+}
+
+.export-modal-footer .btn-secondary {
+    padding: 10px 20px;
+    background: #2d2d3d;
+    border: none;
+    border-radius: 8px;
+    color: #aaa;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.export-modal-footer .btn-secondary:hover {
+    background: #3d3d4d;
+    color: #fff;
+}
+
+.export-modal-footer .btn-primary {
+    padding: 10px 24px;
+    background: linear-gradient(135deg, #4a9eff, #3080df);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.export-modal-footer .btn-primary:hover {
+    background: linear-gradient(135deg, #5aafff, #4090ef);
+    transform: translateY(-1px);
+}
+
+.export-modal-footer .btn-primary:disabled {
+    background: #3d3d4d;
+    color: #666;
+    cursor: not-allowed;
+    transform: none;
+}
