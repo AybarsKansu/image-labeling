@@ -1,17 +1,18 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import clsx from 'clsx';
+import { Tag, Pencil, Search } from 'lucide-react';
 import { stringToColor } from '../../utils/helpers';
-import './Panels.css';
 
 /**
  * FloatingPanel Component
- * Draggable/resizable panel showing label statistics with Rename capabilities.
+ * Panel showing label statistics with Rename capabilities.
  */
 const FloatingPanel = ({
     annotations,
     filterText,
     setFilterText,
     onSelectLabel,
-    onRenameLabel, // New prop for global rename
+    onRenameLabel,
     onToggle,
     docked = false
 }) => {
@@ -22,7 +23,7 @@ const FloatingPanel = ({
     const [isCollapsed, setIsCollapsed] = useState(false);
 
     // Editing State
-    const [editingLabel, setEditingLabel] = useState(null); // The label being renamed
+    const [editingLabel, setEditingLabel] = useState(null);
     const [newLabelValue, setNewLabelValue] = useState('');
 
     const dragOffset = useRef({ x: 0, y: 0 });
@@ -93,7 +94,10 @@ const FloatingPanel = ({
 
     return (
         <div
-            className={`floating-panel ${docked ? 'docked' : ''}`}
+            className={clsx(
+                "flex flex-col bg-[#161922] text-gray-200",
+                docked ? "h-full" : "fixed rounded-lg border border-gray-700 shadow-xl"
+            )}
             style={docked ? {} : {
                 left: panelPos.x,
                 top: panelPos.y,
@@ -101,36 +105,55 @@ const FloatingPanel = ({
                 height: isCollapsed ? 'auto' : panelSize.height
             }}
         >
-            <div className="panel-header" onMouseDown={handleDragStart}>
-                <span className="panel-title">🏷️ Project Labels</span>
+            {/* Header */}
+            <div
+                className={clsx(
+                    "flex items-center gap-2 px-3 py-2.5 border-b border-gray-700",
+                    !docked && "cursor-move"
+                )}
+                onMouseDown={handleDragStart}
+            >
+                <Tag className="w-4 h-4 text-indigo-400" />
+                <span className="text-sm font-semibold text-white">Project Labels</span>
             </div>
 
-            <div className="panel-filter">
-                <input
-                    type="text"
-                    placeholder="Search labels..."
-                    value={filterText}
-                    onChange={(e) => setFilterText(e.target.value)}
-                    className="filter-input"
-                />
+            {/* Filter */}
+            <div className="px-3 py-2 border-b border-gray-700">
+                <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                    <input
+                        type="text"
+                        placeholder="Search labels..."
+                        value={filterText}
+                        onChange={(e) => setFilterText(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 bg-gray-800 border border-gray-600 rounded-lg text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    />
+                </div>
             </div>
 
-            <div className="panel-content">
+            {/* Content */}
+            <div className="flex-1 overflow-auto scrollbar-dark p-2 space-y-1">
                 {labelStats.length === 0 ? (
-                    <p className="empty-message">No labels detected</p>
+                    <div className="flex flex-col items-center justify-center h-full text-gray-500 py-4">
+                        <Tag className="w-8 h-8 mb-2 opacity-50" />
+                        <p className="text-sm">No labels detected</p>
+                    </div>
                 ) : (
                     labelStats.map(([label, count]) => (
                         <div
                             key={label}
-                            className="label-item"
+                            className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-gray-800/50 transition-colors group"
                             onClick={() => onSelectLabel && onSelectLabel(label)}
                         >
-                            <div className="label-color" style={{ background: stringToColor(label) }} />
+                            <div
+                                className="w-3 h-3 rounded-full flex-shrink-0"
+                                style={{ background: stringToColor(label) }}
+                            />
 
                             {editingLabel === label ? (
                                 <input
                                     autoFocus
-                                    className="rename-input"
+                                    className="flex-1 px-2 py-0.5 bg-gray-700 border border-indigo-500 rounded text-sm text-white focus:outline-none"
                                     value={newLabelValue}
                                     onChange={(e) => setNewLabelValue(e.target.value)}
                                     onBlur={submitRename}
@@ -138,17 +161,17 @@ const FloatingPanel = ({
                                     onClick={(e) => e.stopPropagation()}
                                 />
                             ) : (
-                                <span className="label-name">{label}</span>
+                                <span className="flex-1 text-sm text-gray-300 truncate">{label}</span>
                             )}
 
-                            <div className="label-actions">
-                                <span className="label-count">{count}</span>
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-xs text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded">{count}</span>
                                 <button
-                                    className="edit-label-btn"
+                                    className="p-1 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-indigo-400 transition-all"
                                     onClick={(e) => startEditing(e, label)}
                                     title="Rename globally"
                                 >
-                                    ✏️
+                                    <Pencil className="w-3 h-3" />
                                 </button>
                             </div>
                         </div>
@@ -156,11 +179,17 @@ const FloatingPanel = ({
                 )}
             </div>
 
-            <div className="panel-footer">
+            {/* Footer */}
+            <div className="px-3 py-2 text-xs text-gray-500 border-t border-gray-700 text-center">
                 Total: {annotations.length} instances
             </div>
 
-            {!docked && <div className="resize-handle" onMouseDown={handleResizeStart} />}
+            {!docked && (
+                <div
+                    className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize"
+                    onMouseDown={handleResizeStart}
+                />
+            )}
         </div>
     );
 };

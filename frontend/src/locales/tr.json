@@ -1,0 +1,86 @@
+{
+    "common": {
+        "cancel": "İptal",
+        "confirm": "Onayla",
+        "save": "Kaydet",
+        "delete": "Sil",
+        "export": "Dışa Aktar",
+        "import": "İçe Aktar",
+        "loading": "Yükleniyor...",
+        "error": "Hata",
+        "success": "Başarılı"
+    },
+    "explorer": {
+        "title": "Dosya Gezgini",
+        "addImages": "Görsel Ekle",
+        "importLabels": "Etiket İçe Aktar",
+        "dropFiles": "Dosya veya klasör sürükleyin",
+        "dropImages": "Görselleri bırakın",
+        "dropLabels": "Etiket dosyasını bırakın",
+        "clearProject": "Projeyi Temizle",
+        "clearLabels": "Tüm Etiketleri Temizle",
+        "images": "görsel",
+        "labels": "etiket"
+    },
+    "toolbar": {
+        "import": "İçe Aktar",
+        "export": "Dışa Aktar",
+        "select": "Seç",
+        "pan": "Kaydır",
+        "box": "Kutu",
+        "polygon": "Çokgen",
+        "pen": "Kalem",
+        "aiBox": "AI Kutu",
+        "knife": "Bıçak",
+        "eraser": "Silgi",
+        "detect": "Algıla",
+        "segment": "Segmentasyon",
+        "train": "Eğit",
+        "undo": "Geri Al",
+        "redo": "Yinele",
+        "clearAll": "Tümünü Temizle",
+        "classPrompt": "Sınıf ismi (örn: 'araba')"
+    },
+    "sidebar": {
+        "properties": "Özellikler",
+        "model": "Model",
+        "labels": "Etiketler",
+        "settings": "Ayarlar",
+        "selectAnnotation": "Düzenlemek için bir anotasyon seçin",
+        "selectModel": "Parametre ayarlamak için model seçin"
+    },
+    "properties": {
+        "title": "Özellikler",
+        "label": "Etiket",
+        "enterLabel": "Etiket girin...",
+        "suggestions": "Öneriler",
+        "shapeInfo": "Şekil Bilgisi",
+        "type": "Tip",
+        "points": "Nokta",
+        "modifyShape": "Şekli Düzenle",
+        "simplify": "Basitleştir",
+        "densify": "Yoğunlaştır",
+        "reset": "Sıfırla",
+        "beautify": "Güzelleştir",
+        "deleteShape": "Şekli Sil"
+    },
+    "labels": {
+        "title": "Proje Etiketleri",
+        "searchLabels": "Etiket ara...",
+        "noLabels": "Etiket bulunamadı",
+        "totalInstances": "Toplam: {{count}} örnek"
+    },
+    "settings": {
+        "title": "Ayarlar",
+        "language": "Dil",
+        "theme": "Tema",
+        "darkTheme": "Koyu",
+        "lightTheme": "Açık",
+        "midnightTheme": "Gece Mavisi"
+    },
+    "modals": {
+        "exportProject": "Projeyi Dışa Aktar",
+        "manageModels": "Modelleri Yönet",
+        "trainModel": "Model Eğit"
+    }
+}

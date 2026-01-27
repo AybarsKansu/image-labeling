@@ -1,17 +1,27 @@
-import React, { useCallback, useRef, useState, useMemo } from 'react';
+import React, { useCallback, useRef, useState, useMemo, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Virtuoso } from 'react-virtuoso';
 import { useDropzone } from 'react-dropzone';
+import clsx from 'clsx';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+    Folder, FolderOpen, ChevronRight, ChevronDown, Image, FileText,
+    Upload, Trash2, Download, RefreshCw, X, Check, AlertCircle,
+    Clock, Monitor, FileWarning, Save, Eraser
+} from 'lucide-react';
 import { FileStatus } from '../../db/index';
-import './FileExplorer.css';
 
 const FileExplorer = ({
     files = [],
     activeFileId,
+    selectedFileIds = new Set(),
     onSelectFile,
+    onFileClick,
     onIngestFiles,
     onClearAll,
     onRetryFile,
     onRemoveFile,
+    onRemoveSelectedFiles,
     onSaveAll,
     onExportProject,
     onClearLabels,
@@ -22,6 +32,30 @@ const FileExplorer = ({
     const folderInputRef = useRef(null);
     const labelInputRef = useRef(null);
     const [collapsedFolders, setCollapsedFolders] = useState(new Set());
+    const { t } = useTranslation();
+
+    // Keyboard handler for Delete key
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if ((e.key === 'Delete' || e.key === 'Backspace') && selectedFileIds.size > 0) {
+                // Don't trigger if user is typing in an input
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+                e.preventDefault();
+                const count = selectedFileIds.size;
+                const message = count > 1
+                    ? `Delete ${count} selected files?`
+                    : 'Delete selected file?';
+
+                if (window.confirm(message)) {
+                    onRemoveSelectedFiles && onRemoveSelectedFiles();
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [selectedFileIds, onRemoveSelectedFiles]);
 
     // --- Image Dropzone Logic ---
     const onDropImages = useCallback((acceptedFiles) => {
@@ -104,15 +138,12 @@ const FileExplorer = ({
         files.forEach(file => {
             const fullPath = file.path || file.name;
             const parts = fullPath.split('/');
-
-            // Group by directory path
             const dirPath = parts.length > 1 ? parts.slice(0, -1).join('/') : 'Root';
 
             if (!folders[dirPath]) folders[dirPath] = [];
             folders[dirPath].push(file);
         });
 
-        // Sort folder paths alphabetically
         const sortedPaths = Object.keys(folders).sort((a, b) => {
             if (a === 'Root') return -1;
             if (b === 'Root') return 1;
@@ -123,24 +154,18 @@ const FileExplorer = ({
             const isCollapsed = collapsedFolders.has(path);
             const isRoot = path === 'Root';
 
-            // Folder Header
             flatList.push({
                 type: 'folder',
                 path: path,
-                name: isRoot ? '📂 /' : `📁 ${path}`,
+                name: isRoot ? '/' : path,
                 count: folders[path].length,
                 isCollapsed
             });
 
-            // Files in folder
             if (!isCollapsed) {
-                // Sort files in folder
                 const sortedFiles = [...folders[path]].sort((a, b) => a.name.localeCompare(b.name));
                 sortedFiles.forEach(file => {
-                    flatList.push({
-                        type: 'file',
-                        data: file
-                    });
+                    flatList.push({ type: 'file', data: file });
                 });
             }
         });
@@ -152,8 +177,6 @@ const FileExplorer = ({
         return files.reduce((sum, file) => {
             const labelData = file.label_data;
             if (labelData?.d) return sum + labelData.d.length;
-
-            // Check embedded line count if 'd' structure not parsed yet (raw string)
             if (typeof labelData === 'string') {
                 return sum + labelData.split('\n').filter(l => l.trim() && !l.startsWith('#')).length;
             }
@@ -161,101 +184,138 @@ const FileExplorer = ({
         }, 0);
     }, [files]);
 
+    const getStatusIcon = (status) => {
+        const iconClass = "w-4 h-4";
+        switch (status) {
+            case FileStatus.PENDING:
+                return <Clock className={clsx(iconClass, "text-yellow-500")} />;
+            case FileStatus.SYNCING:
+                return <RefreshCw className={clsx(iconClass, "text-blue-400 animate-spin")} />;
+            case FileStatus.SYNCED:
+                return <Check className={clsx(iconClass, "text-green-500")} />;
+            case FileStatus.ERROR:
+                return <AlertCircle className={clsx(iconClass, "text-red-500")} />;
+            case FileStatus.MISSING_IMAGE:
+                return <FileWarning className={clsx(iconClass, "text-orange-500")} />;
+            case FileStatus.MISSING_LABEL:
+                return <Clock className={clsx(iconClass, "text-gray-500")} />;
+            default:
+                return <AlertCircle className={clsx(iconClass, "text-gray-500")} />;
+        }
+    };
+
     return (
-        <div className="file-explorer">
+        <div className="flex flex-col h-full bg-secondary text-primary">
             {/* Header */}
-            <div className="explorer-header">
+            <div className="flex items-center justify-between px-4 py-4 border-b border-border">
                 <div>
-                    <h3>📁 Explorer</h3>
-                    <div className="file-count">{files.length} images • {annotationCount} labels</div>
+                    <h3 className="flex items-center gap-2 text-base font-semibold text-primary">
+                        <Folder className="w-5 h-5 text-accent" />
+                        {t('explorer.title')}
+                    </h3>
+                    <div className="text-xs text-txt-dim mt-0.5">
+                        {files.length} {t('explorer.images')} • {annotationCount} {t('explorer.labels')}
+                    </div>
                 </div>
-                <button
-                    onClick={() => { if (window.confirm('Clear all labels? Images will be kept.')) onClearLabels(); }}
-                    className="icon-btn"
-                    title="Clear All Labels"
-                    style={{ color: '#ffcc00' }}
-                >
-                    📋❌
-                </button>
-                <button
-                    onClick={() => { if (window.confirm('Clear everything (Images + Labels)?')) onClearAll(); }}
-                    className="icon-btn"
-                    title="Clear Project"
-                >
-                    🗑️
-                </button>
+                <div className="flex gap-1">
+                    <button
+                        onClick={() => { if (window.confirm('Clear all labels? Images will be kept.')) onClearLabels(); }}
+                        className="p-1.5 rounded-lg text-yellow-500 hover:bg-yellow-500/20 transition-colors"
+                        title="Clear All Labels"
+                    >
+                        <Eraser className="w-4 h-4" />
+                    </button>
+                    <button
+                        onClick={() => { if (window.confirm('Clear everything (Images + Labels)?')) onClearAll(); }}
+                        className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/20 transition-colors"
+                        title="Clear Project"
+                    >
+                        <Trash2 className="w-4 h-4" />
+                    </button>
+                </div>
             </div>
 
-            {/* Split Upload Zones */}
-            <div className="upload-section">
+            {/* Upload Zones */}
+            <div className="grid grid-cols-2 gap-3 p-4">
                 <div
-                    className={`upload-zone images ${isImageDragActive ? 'drag-active' : ''}`}
+                    className={clsx(
+                        "flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed cursor-pointer transition-all",
+                        isImageDragActive
+                            ? "border-accent bg-accent/10"
+                            : "border-[var(--color-border)] hover:border-accent/50 hover:bg-tertiary"
+                    )}
                     {...getImageRootProps()}
                     onClick={() => fileInputRef.current?.click()}
                 >
                     <input {...getImageInputProps()} />
-                    {/* Standard File Input */}
-                    <input
-                        ref={fileInputRef}
-                        type="file"
-                        multiple
-                        accept="image/*"
-                        onChange={handleImageSelect}
-                        style={{ display: 'none' }}
-                    />
-                    {/* Directory Input */}
-                    <input
-                        ref={folderInputRef}
-                        type="file"
-                        webkitdirectory=""
-                        directory=""
-                        multiple
-                        onChange={handleImageSelect}
-                        style={{ display: 'none' }}
-                    />
-
-                    <span className="upload-icon">🖼️</span>
-                    <span className="upload-text">Add Images</span>
-                    <div className="upload-actions-row">
-                        <small onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}></small>
-                        <span className="divider"></span>
-                        <small onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}></small>
-                    </div>
+                    <input ref={fileInputRef} type="file" multiple accept="image/*" onChange={handleImageSelect} style={{ display: 'none' }} />
+                    <input ref={folderInputRef} type="file" webkitdirectory="" directory="" multiple onChange={handleImageSelect} style={{ display: 'none' }} />
+                    <Image className="w-8 h-8 text-accent" />
+                    <span className="text-sm font-medium text-txt-dim">{t('explorer.addImages')}</span>
                 </div>
 
                 <div
-                    className={`upload-zone labels ${isLabelDragActive ? 'drag-active' : ''}`}
+                    className={clsx(
+                        "flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed cursor-pointer transition-all",
+                        isLabelDragActive
+                            ? "border-green-500 bg-green-500/10"
+                            : "border-[var(--color-border)] hover:border-green-500/50 hover:bg-tertiary"
+                    )}
                     {...getLabelRootProps()}
                     onClick={() => labelInputRef.current?.click()}
                 >
                     <input {...getLabelInputProps()} />
                     <input ref={labelInputRef} type="file" multiple accept=".txt,.xml,.json" onChange={handleLabelSelect} style={{ display: 'none' }} />
-                    <span className="upload-icon">📋</span>
-                    <span className="upload-text">Import Labels</span>
+                    <FileText className="w-8 h-8 text-green-400" />
+                    <span className="text-sm font-medium text-txt-dim">{t('explorer.importLabels')}</span>
                 </div>
             </div>
 
-            {/* Status Bars */}
+            {/* Processing Indicator */}
             {isProcessing && (
-                <div className="processing-indicator">
-                    <div className="processing-text">Ingesting... {processingProgress.processed}/{processingProgress.total}</div>
-                    <div className="progress-bar">
-                        <div className="progress-fill processing" style={{ width: `${(processingProgress.processed / processingProgress.total) * 100}%` }} />
+                <div className="px-3 pb-2">
+                    <div className="bg-gray-800 rounded-lg p-2">
+                        <div className="flex justify-between text-xs text-gray-400 mb-1">
+                            <span>Ingesting...</span>
+                            <span>{processingProgress.processed}/{processingProgress.total}</span>
+                        </div>
+                        <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                            <div
+                                className="h-full bg-indigo-500 transition-all duration-300"
+                                style={{ width: `${(processingProgress.processed / processingProgress.total) * 100}%` }}
+                            />
+                        </div>
                     </div>
                 </div>
             )}
 
             {/* Drag Overlay */}
-            {(isImageDragActive || isLabelDragActive) && (
-                <div className="drag-overlay">
-                    <span>{isLabelDragActive ? '📋 Drop labels file' : '📥 Drop images'}</span>
-                </div>
-            )}
+            <AnimatePresence>
+                {(isImageDragActive || isLabelDragActive) && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 bg-indigo-900/80 backdrop-blur-sm flex items-center justify-center z-10 pointer-events-none"
+                    >
+                        <div className="text-xl text-white font-semibold flex items-center gap-2">
+                            {isLabelDragActive ? (
+                                <><FileText className="w-6 h-6" /> Drop labels file</>
+                            ) : (
+                                <><Upload className="w-6 h-6" /> Drop images</>
+                            )}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Virtual Tree List */}
-            <div className="file-list-container">
+            <div className="flex-1 min-h-0 overflow-hidden custom-scrollbar">
                 {files.length === 0 ? (
-                    <div className="empty-state"><p>Drop files or folders to start</p></div>
+                    <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                        <FolderOpen className="w-12 h-12 mb-2 opacity-50" />
+                        <p className="text-sm">Drop files or folders to start</p>
+                    </div>
                 ) : (
                     <Virtuoso
                         style={{ height: '100%' }}
@@ -263,51 +323,66 @@ const FileExplorer = ({
                         itemContent={(index, item) => {
                             if (item.type === 'folder') {
                                 return (
-                                    <div
-                                        className={`folder-row ${item.isCollapsed ? 'collapsed' : ''}`}
+                                    <motion.div
+                                        className={clsx(
+                                            "flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors",
+                                            "hover:bg-gray-800/50 text-gray-300"
+                                        )}
                                         onClick={() => toggleFolder(item.path)}
                                     >
-                                        <span className="folder-icon">{item.isCollapsed ? '▶' : '▼'}</span>
-                                        <span className="folder-name">{item.name}</span>
-                                        <span className="item-count">({item.count})</span>
-                                    </div>
+                                        {item.isCollapsed ? (
+                                            <ChevronRight className="w-4 h-4 text-gray-500" />
+                                        ) : (
+                                            <ChevronDown className="w-4 h-4 text-gray-500" />
+                                        )}
+                                        {item.isCollapsed ? (
+                                            <Folder className="w-4 h-4 text-yellow-500" />
+                                        ) : (
+                                            <FolderOpen className="w-4 h-4 text-yellow-500" />
+                                        )}
+                                        <span className="text-sm font-medium truncate flex-1">{item.name}</span>
+                                        <span className="text-xs text-gray-500">({item.count})</span>
+                                    </motion.div>
                                 );
                             }
 
                             const { data: file } = item;
                             const isActive = file.id === activeFileId;
-                            const statusIcon = getStatusIcon(file.status);
+                            const isSelected = selectedFileIds.has(file.id);
                             const hasError = file.status === FileStatus.ERROR;
 
                             return (
                                 <div
-                                    className={`file-row ${isActive ? 'active' : ''}`}
-                                    onClick={() => onSelectFile(file.id)}
+                                    className={clsx(
+                                        "group flex items-center gap-3 px-3 py-2.5 ml-4 cursor-pointer transition-all rounded-lg mx-2 my-1",
+                                        isSelected && "bg-accent/20 border border-accent/70",
+                                        isActive && !isSelected && "bg-emerald-600/20 ring-2 ring-emerald-500/50",
+                                        !isSelected && !isActive && "hover:bg-tertiary border border-transparent"
+                                    )}
+                                    onClick={(e) => onFileClick ? onFileClick(file.id, e) : onSelectFile(file.id)}
                                 >
-                                    <div className="file-thumbnail">
+                                    <div className="w-12 h-12 rounded-md overflow-hidden bg-tertiary flex-shrink-0 flex items-center justify-center shadow-sm border border-border">
                                         {file.thumbnail ? (
-                                            <img src={file.thumbnail} alt="" />
+                                            <img src={file.thumbnail} alt="" className="w-full h-full object-cover" />
                                         ) : (
-                                            <div className="placeholder-thumb">
-                                                {file.status === FileStatus.MISSING_IMAGE ? '🖼️⚠️' : '🖼️'}
-                                            </div>
+                                            <Image className="w-6 h-6 text-txt-dim" />
                                         )}
                                     </div>
-                                    <div className="file-info">
-                                        <div className="file-name-row">
-                                            <div className="file-name">{file.name}</div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-sm font-medium text-primary truncate">{file.name}</span>
                                             <button
-                                                className="remove-file-btn"
+                                                className="p-0.5 opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
                                                     if (window.confirm(`Remove ${file.name}?`)) onRemoveFile(file.id);
                                                 }}
                                             >
-                                                ✕
+                                                <X className="w-3 h-3" />
                                             </button>
                                         </div>
-                                        <div className="file-meta">
-                                            <span className="storage-status" title="Local Only">💻</span>
+                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                            <Monitor className="w-3 h-3 text-gray-500" title="Local Only" />
                                             <span
                                                 onClick={(e) => {
                                                     if (hasError) {
@@ -315,11 +390,11 @@ const FileExplorer = ({
                                                         onRetryFile(file.id);
                                                     }
                                                 }}
-                                                className={hasError ? 'retry-trigger' : ''}
+                                                className={hasError ? 'cursor-pointer' : ''}
                                             >
-                                                {statusIcon}
+                                                {getStatusIcon(file.status)}
                                             </span>
-                                            {file.label_data && <span className="label-indicator">📋</span>}
+                                            {file.label_data && <FileText className="w-3 h-3 text-green-500" title="Has Labels" />}
                                         </div>
                                     </div>
                                 </div>
@@ -330,36 +405,36 @@ const FileExplorer = ({
             </div>
 
             {/* Footer Actions */}
-            <div className="explorer-footer">
+            <div className="flex gap-2 p-4 border-t border-border bg-secondary">
                 <button
-                    className="export-btn"
+                    className={clsx(
+                        "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                        files.length === 0
+                            ? "bg-tertiary text-txt-dim/50 cursor-not-allowed"
+                            : "bg-tertiary text-primary hover:bg-tertiary/80 border border-border"
+                    )}
                     onClick={onExportProject}
                     disabled={files.length === 0}
                 >
-                    📤 Export Dataset
+                    <Download className="w-4 h-4" />
+                    {t('common.export')}
                 </button>
                 <button
-                    className="save-all-btn"
+                    className={clsx(
+                        "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                        files.length === 0
+                            ? "bg-accent/50 text-white/50 cursor-not-allowed"
+                            : "bg-accent text-white hover:bg-accent/90 shadow-sm"
+                    )}
                     onClick={() => onSaveAll && onSaveAll()}
                     disabled={files.length === 0}
                 >
-                    🚀 Save to Backend
+                    <Save className="w-4 h-4" />
+                    {t('common.save')}
                 </button>
             </div>
         </div>
     );
 };
-
-function getStatusIcon(status) {
-    const icons = {
-        [FileStatus.PENDING]: '⏳',
-        [FileStatus.SYNCING]: '🔄',
-        [FileStatus.SYNCED]: '✅',
-        [FileStatus.ERROR]: '⚠️',
-        [FileStatus.MISSING_IMAGE]: '❓',
-        [FileStatus.MISSING_LABEL]: '⏱️'
-    };
-    return icons[status] || '❓';
-}
 
 export default FileExplorer;

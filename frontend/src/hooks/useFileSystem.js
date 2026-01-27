@@ -16,7 +16,9 @@ export function useFileSystem() {
     // State
     const [isProcessing, setIsProcessing] = useState(false);
     const [processingProgress, setProcessingProgress] = useState({ processed: 0, total: 0 });
-    const [activeFileId, setActiveFileId] = useState(null);
+    const [activeFileId, setActiveFileId] = useState(null); // File loaded on canvas
+    const [selectedFileIds, setSelectedFileIds] = useState(new Set()); // Multi-selection
+    const [lastSelectedId, setLastSelectedId] = useState(null); // For Shift+Click range
     const [activeFileData, setActiveFileData] = useState(null);
     const [classNames, setClassNames] = useState([]);
     const [error, setError] = useState(null);
@@ -481,6 +483,12 @@ export function useFileSystem() {
             setActiveFileId(null);
             setActiveFileData(null);
         }
+        // Also remove from selection
+        setSelectedFileIds(prev => {
+            const next = new Set(prev);
+            next.delete(fileId);
+            return next;
+        });
     }, [activeFileId]);
 
     /**
@@ -594,10 +602,71 @@ export function useFileSystem() {
         }
     }, [classNames]);
 
+    // Multi-selection handlers
+    const handleFileClick = useCallback((fileId, event) => {
+        const isCtrl = event?.ctrlKey || event?.metaKey;
+        const isShift = event?.shiftKey;
+
+        if (isShift && lastSelectedId && files.length > 0) {
+            // Range selection
+            const fileIds = files.map(f => f.id);
+            const startIdx = fileIds.indexOf(lastSelectedId);
+            const endIdx = fileIds.indexOf(fileId);
+
+            if (startIdx !== -1 && endIdx !== -1) {
+                const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+                const rangeIds = fileIds.slice(from, to + 1);
+                setSelectedFileIds(new Set(rangeIds));
+            }
+        } else if (isCtrl) {
+            // Toggle selection
+            setSelectedFileIds(prev => {
+                const next = new Set(prev);
+                if (next.has(fileId)) {
+                    next.delete(fileId);
+                } else {
+                    next.add(fileId);
+                }
+                return next;
+            });
+            setLastSelectedId(fileId);
+        } else {
+            // Single selection
+            setSelectedFileIds(new Set([fileId]));
+            setLastSelectedId(fileId);
+        }
+
+        // Load clicked file on canvas
+        selectFile(fileId);
+    }, [lastSelectedId, files, selectFile]);
+
+    const clearSelection = useCallback(() => {
+        setSelectedFileIds(new Set());
+        setLastSelectedId(null);
+    }, []);
+
+    const selectAllFiles = useCallback(() => {
+        if (files.length > 0) {
+            setSelectedFileIds(new Set(files.map(f => f.id)));
+        }
+    }, [files]);
+
+    const removeSelectedFiles = useCallback(async () => {
+        if (selectedFileIds.size === 0) return;
+
+        const idsToDelete = Array.from(selectedFileIds);
+        for (const id of idsToDelete) {
+            await removeFile(id);
+        }
+        setSelectedFileIds(new Set());
+        setLastSelectedId(null);
+    }, [selectedFileIds, removeFile]);
+
     return {
         // State
         files,
         activeFileId,
+        selectedFileIds,
         activeFileData,
         classNames,
         isProcessing,
@@ -614,6 +683,10 @@ export function useFileSystem() {
         renameClass,
         renameClassActiveOnly,
         selectFile,
+        handleFileClick,
+        clearSelection,
+        selectAllFiles,
+        removeSelectedFiles,
         updateActiveAnnotations,
         updateFileAnnotations,
         removeFile,
@@ -724,7 +797,7 @@ function parseLabelData(labelData, classNames, imgWidth = 0, imgHeight = 0) {
         if (parts.length < 5) return null;
 
         const classId = parseInt(parts[0]);
-        const className = localClassNames[classId] || classNames[classId] || `class_${classId}`;
+        const className = localClassNames[classId] || `class_${classId}`;
 
         if (parts.length === 5) {
             // YOLO Bbox

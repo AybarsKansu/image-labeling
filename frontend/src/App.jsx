@@ -24,6 +24,7 @@ import FileExplorer from './components/Panels/FileExplorer';
 import RightSidebar from './components/Panels/RightSidebar';
 import DragDropZone from './components/Common/DragDropZone';
 import { ModelManagerModal, PreprocessingModal, TrainPanel, ClassImportModal, ExportModal } from './components/Modals';
+import FloatingTrigger from './components/Common/FloatingTrigger';
 
 
 // Config
@@ -477,10 +478,13 @@ function App() {
 
   return (
     <div
-      className="App"
+      className="App flex flex-col h-screen w-screen overflow-hidden bg-primary font-sans text-primary"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => e.preventDefault()}
     >
+      <FloatingTrigger side="left" isOpen={isLeftPanelOpen} onClick={toggleLeftPanel} />
+      <FloatingTrigger side="right" isOpen={isRightPanelOpen} onClick={toggleRightPanel} />
+
       <MainToolbar
         tool={drawTools.tool} setTool={drawTools.setTool}
         onUndo={annotationsHook.handleUndo} onRedo={annotationsHook.handleRedo}
@@ -502,24 +506,27 @@ function App() {
         setEraserSize={drawTools.setEraserSize}
         onExportCurrent={handleExportCurrent}
 
-        isLeftPanelOpen={isLeftPanelOpen}
-        isRightPanelOpen={isRightPanelOpen}
-        onToggleLeftPanel={toggleLeftPanel}
-        onToggleRightPanel={toggleRightPanel}
       />
 
-      <div className="app-content">
+      <div className="flex flex-1 overflow-hidden relative h-[calc(100vh-56px)]">
         {isLeftPanelOpen && (
           <>
-            <div className="left-panel-container" style={{ width: leftPanelWidth }}>
+            <div className="flex flex-col flex-shrink-0 bg-secondary border-r border-border min-h-0 overflow-hidden" style={{ width: leftPanelWidth }}>
               <FileExplorer
-                files={fileSystem.files} activeFileId={fileSystem.activeFileId}
-                onSelectFile={fileSystem.selectFile} onIngestFiles={fileSystem.ingestFiles}
-                onClearAll={fileSystem.clearProject} onRetryFile={fileSystem.retryFile}
+                files={fileSystem.files}
+                activeFileId={fileSystem.activeFileId}
+                selectedFileIds={fileSystem.selectedFileIds}
+                onSelectFile={fileSystem.selectFile}
+                onFileClick={fileSystem.handleFileClick}
+                onIngestFiles={fileSystem.ingestFiles}
+                onClearAll={fileSystem.clearProject}
+                onRetryFile={fileSystem.retryFile}
                 onClearLabels={fileSystem.clearAllLabels}
                 onRemoveFile={fileSystem.removeFile}
+                onRemoveSelectedFiles={fileSystem.removeSelectedFiles}
                 onSaveAll={handleSaveAll}
-                isProcessing={fileSystem.isProcessing} processingProgress={fileSystem.processingProgress}
+                isProcessing={fileSystem.isProcessing}
+                processingProgress={fileSystem.processingProgress}
                 onExportProject={() => setShowExportModal(true)}
               />
             </div>
@@ -528,9 +535,14 @@ function App() {
         )}
 
         <div
-          className="canvas-area"
+          className="flex-1 min-w-0 relative bg-[var(--color-bg-secondary)] overflow-hidden"
+          style={{
+            backgroundImage: 'radial-gradient(var(--color-border) 1px, transparent 1px)',
+            backgroundSize: '20px 20px',
+            opacity: 1 // Ensure container is visible
+          }}
           ref={canvasContainerRef}
-          onContextMenu={(e) => e.preventDefault()} // Block browser menu here too
+          onContextMenu={(e) => e.preventDefault()}
         >
           {!stage.imageObj ? (
             <DragDropZone onImageUpload={handleImageUpload} />
@@ -555,7 +567,7 @@ function App() {
         {isRightPanelOpen && (
           <>
             <div className="panel-resizer right" onMouseDown={() => setIsResizingRight(true)} />
-            <div className="right-panel-container" style={{ width: rightPanelWidth }}>
+            <div className="flex flex-col flex-shrink-0 bg-secondary border-l border-border min-h-0 overflow-hidden" style={{ width: rightPanelWidth }}>
               <RightSidebar
                 selectedAnn={annotationsHook.selectedAnn} selectedLabel={annotationsHook.selectedLabel}
                 onLabelChange={handleLabelChange} onDelete={annotationsHook.deleteSelected}
