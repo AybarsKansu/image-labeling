@@ -440,8 +440,14 @@ function App() {
   // Layout Resizing
   const [leftPanelWidth, setLeftPanelWidth] = useState(250);
   const [rightPanelWidth, setRightPanelWidth] = useState(280);
+  const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
   const [isResizingLeft, setIsResizingLeft] = useState(false);
   const [isResizingRight, setIsResizingRight] = useState(false);
+
+  // Toggle Handlers
+  const toggleLeftPanel = () => setIsLeftPanelOpen(!isLeftPanelOpen);
+  const toggleRightPanel = () => setIsRightPanelOpen(!isRightPanelOpen);
 
   useEffect(() => {
     const handleMouseMove = (e) => {
@@ -495,25 +501,37 @@ function App() {
         eraserSize={drawTools.eraserSize}
         setEraserSize={drawTools.setEraserSize}
         onExportCurrent={handleExportCurrent}
+
+        isLeftPanelOpen={isLeftPanelOpen}
+        isRightPanelOpen={isRightPanelOpen}
+        onToggleLeftPanel={toggleLeftPanel}
+        onToggleRightPanel={toggleRightPanel}
       />
 
       <div className="app-content">
-        <div className="left-panel-container" style={{ width: leftPanelWidth }}>
-          <FileExplorer
-            files={fileSystem.files} activeFileId={fileSystem.activeFileId}
-            onSelectFile={fileSystem.selectFile} onIngestFiles={fileSystem.ingestFiles}
-            onClearAll={fileSystem.clearProject} onRetryFile={fileSystem.retryFile}
-            onClearLabels={fileSystem.clearAllLabels}
-            onRemoveFile={fileSystem.removeFile}
-            onSaveAll={handleSaveAll}
-            isProcessing={fileSystem.isProcessing} processingProgress={fileSystem.processingProgress}
-            onExportProject={() => setShowExportModal(true)}
-          />
-        </div>
+        {isLeftPanelOpen && (
+          <>
+            <div className="left-panel-container" style={{ width: leftPanelWidth }}>
+              <FileExplorer
+                files={fileSystem.files} activeFileId={fileSystem.activeFileId}
+                onSelectFile={fileSystem.selectFile} onIngestFiles={fileSystem.ingestFiles}
+                onClearAll={fileSystem.clearProject} onRetryFile={fileSystem.retryFile}
+                onClearLabels={fileSystem.clearAllLabels}
+                onRemoveFile={fileSystem.removeFile}
+                onSaveAll={handleSaveAll}
+                isProcessing={fileSystem.isProcessing} processingProgress={fileSystem.processingProgress}
+                onExportProject={() => setShowExportModal(true)}
+              />
+            </div>
+            <div className="panel-resizer left" onMouseDown={() => setIsResizingLeft(true)} />
+          </>
+        )}
 
-        <div className="panel-resizer left" onMouseDown={() => setIsResizingLeft(true)} />
-
-        <div className="canvas-area" ref={canvasContainerRef}>
+        <div
+          className="canvas-area"
+          ref={canvasContainerRef}
+          onContextMenu={(e) => e.preventDefault()} // Block browser menu here too
+        >
           {!stage.imageObj ? (
             <DragDropZone onImageUpload={handleImageUpload} />
           ) : (
@@ -526,31 +544,34 @@ function App() {
               currentPenPoints={drawTools.currentPenPoints} mousePos={drawTools.mousePos}
               eraserSize={drawTools.eraserSize} color={drawTools.color}
               onWheel={stage.handleWheel} onClick={drawTools.handleStageClick}
-              onMouseDown={drawTools.handleMouseDown} onMouseMove={drawTools.handleMouseMove}
-              onMouseUp={drawTools.handleMouseUp} onDblClick={handleDoubleClick}
+              onMouseDown={handleMouseDown} onMouseMove={drawTools.handleMouseMove}
+              onMouseUp={handleMouseUp} onDblClick={handleDoubleClick}
               onVertexDrag={drawTools.handleVertexDrag}
             />
           )}
           {menuPosition && <FloatingSelectionMenu position={menuPosition} selectedCount={annotationsHook.selectedIds.length} onMerge={handleMerge} />}
         </div>
 
-        <div className="panel-resizer right" onMouseDown={() => setIsResizingRight(true)} />
-
-        <div className="right-panel-container" style={{ width: rightPanelWidth }}>
-          <RightSidebar
-            selectedAnn={annotationsHook.selectedAnn} selectedLabel={annotationsHook.selectedLabel}
-            onLabelChange={handleLabelChange} onDelete={annotationsHook.deleteSelected}
-            onSimplify={polygonMods.handleSimplify} onDensify={polygonMods.handleDensify}
-            onReset={polygonMods.handleReset} onBeautify={handleBeautify}
-            canModify={polygonMods.canModify} canReset={polygonMods.canReset}
-            isProcessing={drawTools.isProcessing} suggestions={annotationsHook.selectedAnn?.suggestions}
-            selectedModel={aiModels.selectedModel} currentParams={aiModels.currentParams}
-            updateParam={aiModels.updateParam} annotations={annotationsHook.annotations}
-            filterText={drawTools.filterText} setFilterText={drawTools.setFilterText}
-            onSelectLabel={(l) => drawTools.setFilterText(l)}
-            onRenameLabel={(o, n) => fileSystem.renameClassActiveOnly(o, n)}
-          />
-        </div>
+        {isRightPanelOpen && (
+          <>
+            <div className="panel-resizer right" onMouseDown={() => setIsResizingRight(true)} />
+            <div className="right-panel-container" style={{ width: rightPanelWidth }}>
+              <RightSidebar
+                selectedAnn={annotationsHook.selectedAnn} selectedLabel={annotationsHook.selectedLabel}
+                onLabelChange={handleLabelChange} onDelete={annotationsHook.deleteSelected}
+                onSimplify={polygonMods.handleSimplify} onDensify={polygonMods.handleDensify}
+                onReset={polygonMods.handleReset} onBeautify={handleBeautify}
+                canModify={polygonMods.canModify} canReset={polygonMods.canReset}
+                isProcessing={drawTools.isProcessing} suggestions={annotationsHook.selectedAnn?.suggestions}
+                selectedModel={aiModels.selectedModel} currentParams={aiModels.currentParams}
+                updateParam={aiModels.updateParam} annotations={annotationsHook.annotations}
+                filterText={drawTools.filterText} setFilterText={drawTools.setFilterText}
+                onSelectLabel={(l) => drawTools.setFilterText(l)}
+                onRenameLabel={(o, n) => fileSystem.renameClassActiveOnly(o, n)}
+              />
+            </div>
+          </>
+        )}
       </div>
 
       <ModelManagerModal

@@ -217,9 +217,9 @@ const FileExplorer = ({
                     <span className="upload-icon">🖼️</span>
                     <span className="upload-text">Add Images</span>
                     <div className="upload-actions-row">
-                        <small onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>Select Files</small>
-                        <span className="divider">|</span>
-                        <small onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}>Select Folder</small>
+                        <small onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}></small>
+                        <span className="divider"></span>
+                        <small onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}></small>
                     </div>
                 </div>
 
@@ -232,7 +232,6 @@ const FileExplorer = ({
                     <input ref={labelInputRef} type="file" multiple accept=".txt,.xml,.json" onChange={handleLabelSelect} style={{ display: 'none' }} />
                     <span className="upload-icon">📋</span>
                     <span className="upload-text">Import Labels</span>
-                    <span className="upload-hint">.txt .xml .json</span>
                 </div>
             </div>
 

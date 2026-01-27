@@ -35,24 +35,30 @@ export const useStageSystem = () => {
     }, []);
 
     // --- Image Fit on Load ---
+    const lastImageSrcRef = useRef(null);
+
     useEffect(() => {
         if (imageObj) {
-            const stageW = stageSize.width;
-            const stageH = stageSize.height;
-            const imgW = imageObj.naturalWidth;
-            const imgH = imageObj.naturalHeight;
+            // Only reset layout if it's a new image source
+            if (lastImageSrcRef.current !== imageObj.src) {
+                lastImageSrcRef.current = imageObj.src;
 
-            const scale = Math.min(stageW / imgW, stageH / imgH);
-            const xOffset = (stageW - imgW * scale) / 2;
-            const yOffset = (stageH - imgH * scale) / 2;
+                const stageW = stageSize.width;
+                const stageH = stageSize.height;
+                const imgW = imageObj.naturalWidth;
+                const imgH = imageObj.naturalHeight;
 
-            setImageLayout({
-                x: xOffset,
-                y: yOffset,
-                scale: scale
-            });
+                const scale = Math.min(stageW / imgW, stageH / imgH);
+                const xOffset = (stageW - imgW * scale) / 2;
+                const yOffset = (stageH - imgH * scale) / 2;
+
+                setImageLayout({
+                    x: xOffset,
+                    y: yOffset,
+                    scale: scale
+                });
+            }
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [imageObj, stageSize]);
 
     // --- Load image when URL changes ---

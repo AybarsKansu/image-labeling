@@ -129,10 +129,9 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
         }
 
         if (tool === 'select' || tool === 'pan') {
-            if (tool === 'pan') {
-                startPosRef.current = stageRef.current.getPointerPosition();
-                setIsDrawing(true);
-            }
+            startPosRef.current = stageRef.current.getPointerPosition();
+            setIsDrawing(true);
+            stageRef.current.container().style.cursor = 'grabbing';
             return;
         }
 
@@ -156,8 +155,8 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
 
     // --- Mouse Move Handler ---
     const handleMouseMove = useCallback((e) => {
-        // Panning (Tool OR Right-Click)
-        if ((isDrawing && tool === 'pan') || isRightPanningRef.current) {
+        // Panning (Tool OR Right-Click OR Select-Drag)
+        if ((isDrawing && (tool === 'pan' || tool === 'select')) || isRightPanningRef.current) {
             const stage = stageRef.current;
             const pointer = stage.getPointerPosition();
             const start = startPosRef.current;
@@ -268,6 +267,11 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
         setIsDrawing(false);
 
         if (tool === 'pan' || tool === 'eraser') return;
+
+        if (tool === 'select') {
+            stageRef.current.container().style.cursor = 'default';
+            return;
+        }
 
         // Pen Tool
         if (tool === 'pen') {

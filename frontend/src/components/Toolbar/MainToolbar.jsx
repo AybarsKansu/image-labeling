@@ -44,6 +44,12 @@ const MainToolbar = ({
     onExportCurrent, // NEW: Export current image only
 
 
+    // State for panel toggles (passed from App)
+    isLeftPanelOpen,
+    isRightPanelOpen,
+    onToggleLeftPanel,
+    onToggleRightPanel,
+
     // Status
     isProcessing,
     saveMessage
@@ -148,6 +154,16 @@ const MainToolbar = ({
 
     return (
         <div className="main-toolbar">
+            {/* Left Panel Toggle */}
+            <button
+                className={`toolbar-btn ${isLeftPanelOpen ? 'active' : ''}`}
+                onClick={onToggleLeftPanel}
+                title={isLeftPanelOpen ? "Close File Panel" : "Open File Panel"}
+                style={{ marginRight: '8px' }}
+            >
+                {isLeftPanelOpen ? '⬅️' : '➡️'}
+            </button>
+
             {/* File Section */}
             <div className="toolbar-section">
                 {/* Load Annotations Dropdown */}
@@ -398,6 +414,17 @@ const MainToolbar = ({
                     title="Train Model"
                 >
                     Train Model
+                </button>
+            </div>
+
+            {/* Right Panel Toggle - Push to end if needed, or just append */}
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
+                <button
+                    className={`toolbar-btn ${isRightPanelOpen ? 'active' : ''}`}
+                    onClick={onToggleRightPanel}
+                    title={isRightPanelOpen ? "Close Right Sidebar" : "Open Right Sidebar"}
+                >
+                    {isRightPanelOpen ? '➡️' : '⬅️'}
                 </button>
             </div>
 
