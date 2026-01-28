@@ -55,13 +55,14 @@ const FileExplorer = ({
     };
     const { t } = useTranslation();
 
-    // Keyboard handler for Delete key
+    // Keyboard handler for navigation and shortcuts
     useEffect(() => {
         const handleKeyDown = (e) => {
-            if ((e.key === 'Delete' || e.key === 'Backspace') && selectedFileIds.size > 0) {
-                // Don't trigger if user is typing in an input
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            // Ignore if typing in input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
+            // Delete Shortcut
+            if ((e.key === 'Delete' || e.key === 'Backspace') && selectedFileIds.size > 0) {
                 e.preventDefault();
                 const count = selectedFileIds.size;
                 const message = count > 1
@@ -71,12 +72,41 @@ const FileExplorer = ({
                 if (window.confirm(message)) {
                     onRemoveSelectedFiles && onRemoveSelectedFiles();
                 }
+                return;
+            }
+
+            // Arrow Navigation
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (files.length === 0) return;
+
+                const currentIndex = files.findIndex(f => f.id === activeFileId);
+                let nextIndex = -1;
+
+                if (currentIndex === -1) {
+                    // If nothing selected, select first
+                    nextIndex = 0;
+                } else if (e.key === 'ArrowUp') {
+                    nextIndex = Math.max(0, currentIndex - 1);
+                } else if (e.key === 'ArrowDown') {
+                    nextIndex = Math.min(files.length - 1, currentIndex + 1);
+                }
+
+                if (nextIndex !== -1 && nextIndex !== currentIndex) {
+                    const nextFile = files[nextIndex];
+                    // Trigger both select and click handler logic
+                    if (onFileClick) onFileClick(nextFile.id);
+                    else onSelectFile(nextFile.id);
+
+                    // Also update selection set for visual feedback
+                    // onSelectFile(nextFile.id) usually handles this but depends on implementation
+                }
             }
         };
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [selectedFileIds, onRemoveSelectedFiles]);
+    }, [selectedFileIds, onRemoveSelectedFiles, files, activeFileId, onFileClick, onSelectFile]);
 
     // --- Image Dropzone Logic ---
     const onDropImages = useCallback((acceptedFiles) => {

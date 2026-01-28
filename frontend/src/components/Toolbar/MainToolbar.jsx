@@ -281,10 +281,13 @@ const MainToolbar = ({
                 <button
                     className="btn-ghost w-8 h-8 px-0"
                     onClick={onOpenModelManager}
-                    title="Manage Models"
+                    title="Download Models"
                 >
-                    <Settings size={14} />
+                    <Download size={20}
+                        strokeWidth={2}
+                        style={{ minWidth: '20px', minHeight: '20px', display: 'block' }} />
                 </button>
+
             </div>
 
             {/* Divider */}
