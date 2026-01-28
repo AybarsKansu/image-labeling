@@ -1,5 +1,4 @@
 import React, { useCallback, useRef, useState, useMemo, useEffect } from 'react';
-import { useTranslation } from 'react-i18next';
 import { Virtuoso } from 'react-virtuoso';
 import { useDropzone } from 'react-dropzone';
 import clsx from 'clsx';
@@ -10,8 +9,6 @@ import {
     Clock, Monitor, FileWarning, Save, Eraser
 } from 'lucide-react';
 import { FileStatus } from '../../db/index';
-import { useVideoUpload } from '../../hooks/useVideoUpload';
-import VideoPlayerModal from '../Modals/VideoPlayerModal';
 
 const FileExplorer = ({
     files = [],
@@ -35,25 +32,6 @@ const FileExplorer = ({
     const labelInputRef = useRef(null);
     const videoInputRef = useRef(null);
     const [collapsedFolders, setCollapsedFolders] = useState(new Set());
-
-    // Video Upload Hook
-    const [showVideoModal, setShowVideoModal] = useState(false);
-    const { startUpload, isUploading: isVideoUploading, uploadProgress, videoInfo } = useVideoUpload();
-
-    useEffect(() => {
-        if (videoInfo) {
-            setShowVideoModal(true);
-        }
-    }, [videoInfo]);
-
-    const handleVideoSelect = (e) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            startUpload(file);
-        }
-        e.target.value = '';
-    };
-    const { t } = useTranslation();
 
     // Keyboard handler for navigation and shortcuts
     useEffect(() => {
@@ -128,6 +106,38 @@ const FileExplorer = ({
         noKeyboard: true
     });
 
+    // --- Video Dropzone Logic ---
+    const onDropVideo = useCallback((acceptedFiles) => {
+        const videos = acceptedFiles.filter(f =>
+            f.type.startsWith('video/') ||
+            /\.(mp4|webm|ogg|mov|mkv)$/i.test(f.name)
+        );
+        if (videos.length > 0) onIngestFiles(videos);
+    }, [onIngestFiles]);
+
+    const {
+        getRootProps: getVideoRootProps,
+        getInputProps: getVideoInputProps,
+        isDragActive: isVideoDragActive
+    } = useDropzone({
+        onDrop: onDropVideo,
+        accept: { 'video/*': ['.mp4', '.webm', '.ogg', '.mov', '.mkv'] },
+        noClick: true,
+        noKeyboard: true
+    });
+
+    const handleImageSelect = (e) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length > 0) onIngestFiles(files);
+        e.target.value = '';
+    };
+
+    const handleVideoSelect = (e) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length > 0) onIngestFiles(files);
+        e.target.value = '';
+    };
+
     // --- Label Dropzone Logic ---
     const onDropLabels = useCallback((acceptedFiles) => {
         const labelFiles = acceptedFiles.filter(f =>
@@ -154,13 +164,6 @@ const FileExplorer = ({
         multiple: true
     });
 
-    const handleImageSelect = (e) => {
-        const files = Array.from(e.target.files || []);
-        if (files.length > 0) {
-            onIngestFiles(files);
-        }
-        e.target.value = '';
-    };
 
     const handleLabelSelect = (e) => {
         const files = Array.from(e.target.files || []);
@@ -262,10 +265,10 @@ const FileExplorer = ({
                 <div>
                     <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
                         <Folder className="w-4 h-4 text-[var(--accent-indigo)]" />
-                        {t('explorer.title')}
+                        Explorer
                     </h3>
                     <div className="text-xs text-[var(--text-muted)] mt-0.5">
-                        {files.length} {t('explorer.images')} • {annotationCount} {t('explorer.labels')}
+                        {files.length} Files • {annotationCount} labels
                     </div>
                 </div>
                 <div className="flex gap-1">
@@ -303,20 +306,27 @@ const FileExplorer = ({
                     <input ref={fileInputRef} type="file" multiple accept="image/*" onChange={handleImageSelect} style={{ display: 'none' }} />
                     <input ref={folderInputRef} type="file" webkitdirectory="" directory="" multiple onChange={handleImageSelect} style={{ display: 'none' }} />
                     <Image className="w-8 h-8 text-[var(--color-accent)]" />
-                    <span className="text-sm font-medium text-[var(--color-txt-dim)]">{t('explorer.addImages')}</span>
+                    <span className="text-sm font-medium text-[var(--color-txt-dim)]">Add Images</span>
                 </div>
 
                 {/* 2. Upload Video */}
                 <div
-                    className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed border-[var(--color-border)] hover:border-purple-500 hover:bg-[var(--color-bg-tertiary)] cursor-pointer transition-all"
+                    className={clsx(
+                        "flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed border-[var(--color-border)] hover:border-purple-500 hover:bg-[var(--color-bg-tertiary)] cursor-pointer transition-all",
+                        isVideoDragActive
+                            ? "border-purple-500 bg-purple-500/10"
+                            : ""
+                    )}
+                    {...getVideoRootProps()}
                     onClick={() => videoInputRef.current?.click()}
                 >
+                    <input {...getVideoInputProps()} />
                     <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoSelect} style={{ display: 'none' }} />
                     <Monitor className="w-8 h-8 text-purple-500" />
                     <span className="text-sm font-medium text-theme-secondary">Upload Video</span>
                 </div>
 
-                {/* 3. Import Labels (Full Width) */}
+                {/* 2. Import Labels (Full Width) */}
                 <div
                     className={clsx(
                         "col-span-2 flex flex-col items-center justify-center gap-2 p-4 rounded-lg border-2 border-dashed cursor-pointer transition-all",
@@ -331,28 +341,10 @@ const FileExplorer = ({
                     <input ref={labelInputRef} type="file" multiple accept=".txt,.xml,.json" onChange={handleLabelSelect} style={{ display: 'none' }} />
                     <div className="flex items-center gap-2">
                         <FileText className="w-5 h-5 text-green-400" />
-                        <span className="text-sm font-medium text-theme-secondary">{t('explorer.importLabels')}</span>
+                        <span className="text-sm font-medium text-theme-secondary">Import Labels</span>
                     </div>
                 </div>
             </div>
-
-            {/* Video Progress */}
-            {isVideoUploading && (
-                <div className="px-4 pb-2">
-                    <div className="bg-theme-tertiary rounded-lg p-3 border border-purple-500/30">
-                        <div className="flex justify-between text-xs text-purple-300 mb-1">
-                            <span>Uploading Video...</span>
-                            <span>{uploadProgress}%</span>
-                        </div>
-                        <div className="h-1.5 bg-[var(--bg-primary)] rounded-full overflow-hidden">
-                            <div
-                                className="h-full bg-purple-500 transition-all duration-300"
-                                style={{ width: `${uploadProgress}%` }}
-                            />
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* Processing Indicator */}
             {isProcessing && (
@@ -374,7 +366,7 @@ const FileExplorer = ({
 
             {/* Drag Overlay */}
             <AnimatePresence>
-                {(isImageDragActive || isLabelDragActive) && (
+                {(isImageDragActive || isVideoDragActive || isLabelDragActive) && (
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -384,6 +376,8 @@ const FileExplorer = ({
                         <div className="text-xl text-white font-semibold flex items-center gap-2">
                             {isLabelDragActive ? (
                                 <><FileText className="w-6 h-6" /> Drop labels file</>
+                            ) : isVideoDragActive ? (
+                                <><Monitor className="w-6 h-6" /> Drop video file</>
                             ) : (
                                 <><Upload className="w-6 h-6" /> Drop images</>
                             )}
@@ -445,8 +439,10 @@ const FileExplorer = ({
                                     onClick={(e) => onFileClick ? onFileClick(file.id, e) : onSelectFile(file.id)}
                                 >
                                     {/* 16:9 Thumbnail */}
-                                    <div className="thumbnail-16-9 w-20 flex-shrink-0 flex items-center justify-center border border-[var(--border-subtle)]">
-                                        {file.thumbnail ? (
+                                    <div className="thumbnail-16-9 w-20 flex-shrink-0 flex items-center justify-center border border-[var(--border-subtle)] bg-black/20">
+                                        {file.type === 'video' ? (
+                                            <Monitor className="w-8 h-8 text-purple-500" />
+                                        ) : file.thumbnail ? (
                                             <img src={file.thumbnail} alt="" className="w-full h-full object-cover" />
                                         ) : (
                                             <Image className="w-5 h-5 text-[var(--text-muted)]" />
@@ -500,7 +496,7 @@ const FileExplorer = ({
                     disabled={files.length === 0}
                 >
                     <Download className="w-4 h-4" />
-                    {t('common.export')}
+                    Export
                 </button>
                 <button
                     className={clsx(
@@ -513,14 +509,9 @@ const FileExplorer = ({
                     disabled={files.length === 0}
                 >
                     <Save className="w-4 h-4" />
-                    {t('common.save')}
+                    Save
                 </button>
             </div>
-            <VideoPlayerModal
-                isOpen={showVideoModal}
-                onClose={() => setShowVideoModal(false)}
-                videoInfo={videoInfo}
-            />
         </div>
     );
 };

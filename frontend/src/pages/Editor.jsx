@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import * as turf from '@turf/turf';
 import '../App.css';
@@ -24,6 +23,7 @@ import RightSidebar from '../components/Panels/RightSidebar';
 import DragDropZone from '../components/Common/DragDropZone';
 import { ExportModal } from '../components/Modals';
 import FloatingTrigger from '../components/Common/FloatingTrigger';
+import VideoWorkspace from '../components/Workspaces/VideoWorkspace';
 
 // Config
 import { generateId } from '../utils/helpers';
@@ -31,6 +31,8 @@ import { AnnotationConverter } from '../utils/annotationConverter';
 
 function Editor() {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const projectId = searchParams.get('projectId');
     // ============================================
     // CUSTOM HOOKS
     // ============================================
@@ -41,7 +43,7 @@ function Editor() {
     const aiModels = useAIModels(null, textPrompt);
     const drawTools = useDrawTools(stage, annotationsHook, textPrompt, aiModels.selectedModel, aiModels.currentParams);
     const polygonMods = usePolygonModifiers(annotationsHook, stage);
-    const fileSystem = useFileSystem();
+    const fileSystem = useFileSystem(projectId);
     const { exportProject } = useExport();
     const formatConverter = useFormatConverter();
 
@@ -51,6 +53,15 @@ function Editor() {
     const { activeFileData } = fileSystem;
     const { setImageUrl, setImageFile, closeImage } = stage;
     const { setAnnotations, clearSelection, reset: resetAnns } = annotationsHook;
+
+    // ============================================
+    // PERSISTENCE: Save last project ID
+    // ============================================
+    useEffect(() => {
+        if (projectId) {
+            localStorage.setItem('lastActiveProjectId', projectId);
+        }
+    }, [projectId]);
 
     useEffect(() => {
         if (activeFileData) {
@@ -94,13 +105,6 @@ function Editor() {
             return () => clearTimeout(timer);
         }
     }, [annotationsHook.annotations, fileSystem.activeFileId]);
-
-    // Sync memory back to file list (to update label counts in sidebar)
-    useEffect(() => {
-        if (fileSystem.activeFileId) {
-            // This is a local optimization to keep counts accurate without full DB re-render
-        }
-    }, [annotationsHook.annotations]);
 
     // Reset initial load flag when file changes
     useEffect(() => {
@@ -494,12 +498,22 @@ function Editor() {
 
                 <div
                     className="flex-1 min-w-0 relative bg-theme-secondary overflow-hidden"
-                    style={{ backgroundImage: 'radial-gradient(var(--text-secondary) 1px, transparent 1px)', backgroundSize: '20px 20px' }}
+                    style={{ backgroundImage: activeFileData?.type === 'video' ? 'none' : 'radial-gradient(var(--text-secondary) 1px, transparent 1px)', backgroundSize: '20px 20px' }}
                     ref={canvasContainerRef}
                     onContextMenu={(e) => e.preventDefault()}
                 >
-                    {!stage.imageObj ? (
+                    {!activeFileData ? (
                         <DragDropZone onImageUpload={handleImageUpload} />
+                    ) : activeFileData.type === 'video' ? (
+                        <VideoWorkspace
+                            videoFile={activeFileData}
+                            onCapture={(file) => {
+                                // Add project ID context to capture
+                                const fileWithProject = new File([file], file.name, { type: file.type });
+                                // We rely on fileSystem to tag it with projectId
+                                fileSystem.ingestFiles([fileWithProject]);
+                            }}
+                        />
                     ) : (
                         <CanvasStage
                             stageRef={stage.stageRef} groupRef={stage.groupRef} stageSize={stage.stageSize}
@@ -515,7 +529,9 @@ function Editor() {
                             onVertexDrag={drawTools.handleVertexDrag}
                         />
                     )}
-                    {menuPosition && <FloatingSelectionMenu position={menuPosition} selectedCount={annotationsHook.selectedIds.length} onMerge={handleMerge} />}
+                    {menuPosition && activeFileData?.type !== 'video' && (
+                        <FloatingSelectionMenu position={menuPosition} selectedCount={annotationsHook.selectedIds.length} onMerge={handleMerge} />
+                    )}
                 </div>
 
                 {isRightPanelOpen && (

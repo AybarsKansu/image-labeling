@@ -12,10 +12,28 @@ export const db = new Dexie('ImageLabelingDB');
 // Define schema
 // Note: Only indexed fields are listed in the schema string.
 // blob, thumbnail, label_data are stored but not indexed for performance.
-db.version(3).stores({
-    files: '++id, name, baseName, path, type, status, retry_count, backend_url, paired_label_id, created_at',
-    // Global settings (e.g., classes map)
+// Define schema
+// Note: Only indexed fields are listed in the schema string.
+// blob, thumbnail, label_data are stored but not indexed for performance.
+db.version(4).stores({
+    projects: 'id, name, created_at, updated_at', // New projects table
+    files: '++id, name, baseName, path, type, status, retry_count, backend_url, paired_label_id, created_at, project_id', // Added project_id
     settings: 'key'
+}).upgrade(async tx => {
+    // Migration: Move existing files to a default "Legacy Project"
+    const defaultProjectId = crypto.randomUUID();
+
+    await tx.table('projects').add({
+        id: defaultProjectId,
+        name: 'My First Project',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        thumbnail: null,
+        file_count: 0 // Will need recalc
+    });
+
+    // Update all existing files
+    await tx.table('files').toCollection().modify({ project_id: defaultProjectId });
 });
 
 // File status constants

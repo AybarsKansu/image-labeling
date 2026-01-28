@@ -12,7 +12,10 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import db, { FileStatus } from '../db/index';
 import { addFilesInChunks, getFile, updateFile, deleteFile, saveSetting, getSetting } from '../db/fileOperations';
 
-export function useFileSystem() {
+// Basic UUID regex check
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function useFileSystem(projectId = null) {
     // State
     const [isProcessing, setIsProcessing] = useState(false);
     const [processingProgress, setProcessingProgress] = useState({ processed: 0, total: 0 });
@@ -27,11 +30,22 @@ export function useFileSystem() {
     const activeBlobUrlRef = useRef(null);
     const workerRef = useRef(null);
 
+    // Validate project ID format
+    const isValidProject = projectId && typeof projectId === 'string' && UUID_REGEX.test(projectId);
+
     // Live query for file list (only metadata, no blobs for performance)
     const files = useLiveQuery(
-        () => db.files.orderBy('created_at').reverse().toArray(),
-        [],
-        []
+        () => {
+            if (isValidProject) {
+                return db.files.where('project_id').equals(projectId).reverse().sortBy('created_at');
+            } else {
+                // Fallback: If no project ID (or invalid), show all files (Legacy behavior)
+                // In a stricter system, we might want to show nothing or a specific "Unassigned" list
+                return db.files.orderBy('created_at').reverse().toArray();
+            }
+        },
+        [projectId, isValidProject], // dependencies
+        [] // default result
     );
 
     // Initialize Web Worker
@@ -78,7 +92,7 @@ export function useFileSystem() {
             default:
                 break;
         }
-    }, []);
+    }, [projectId]); // Depend on projectId for process complete handler context
 
     // Handle completed file processing (Images + Labels pairing)
     const handleProcessComplete = useCallback(async (result) => {
@@ -86,6 +100,15 @@ export function useFileSystem() {
             const { images, labels } = result;
             const totalToProcess = images.length + labels.length;
             let processedItems = 0;
+
+            // Determine Target Project ID
+            // If projectId is valid, use it. If not, use the default "Legacy" ID or a fallback.
+            // Ideally projectId should be passed.
+            const targetPid = (isValidProject) ? projectId : (await db.projects.orderBy('created_at').first())?.id;
+
+            if (!targetPid) {
+                throw new Error("No active project found to save files to.");
+            }
 
             // ---------------------------------------------------------
             // ADIM 1: Görüntüleri İşle (Toplu Okuma Stratejisi)
@@ -101,9 +124,17 @@ export function useFileSystem() {
                 .anyOf(incomingImageBaseNames)
                 .toArray();
 
+            // Filter existing records to ONLY those in current project (if we want to allow duplicates across projects)
+            // For now, let's assume baseName uniqueness is global or we filter by checking project_id if needed.
+            // But usually unique filename per project is safest.
+            // Let's rely on simple baseName match for update regardless of project for now to keep logic simple,
+            // OR strictly filter existing by project_id.
+            // Better: Filter existing by project too.
+            const existingInProject = existingRecordsArray.filter(f => f.project_id === targetPid);
+
             // Hızlı erişim için array'i Map'e çevir (Lookup Table)
             // Key: baseName, Value: Record
-            const existingMap = new Map(existingRecordsArray.map(rec => [rec.baseName, rec]));
+            const existingMap = new Map(existingInProject.map(rec => [rec.baseName, rec]));
 
             const imageUpdates = images.map(img => {
                 const existing = existingMap.get(img.baseName); // Artık await yok, anlık erişim!
@@ -119,7 +150,8 @@ export function useFileSystem() {
                         width: img.width,
                         height: img.height,
                         // Eğer label verisi zaten varsa PENDING, yoksa MISSING_LABEL
-                        status: existing.label_data ? FileStatus.PENDING : FileStatus.MISSING_LABEL
+                        status: existing.label_data ? FileStatus.PENDING : FileStatus.MISSING_LABEL,
+                        project_id: targetPid // Ensure affiliation
                     };
                 } else {
                     // Create Logic
@@ -134,16 +166,36 @@ export function useFileSystem() {
                         height: img.height,
                         label_data: null,
                         status: FileStatus.MISSING_LABEL,
-                        created_at: new Date().toISOString()
+                        created_at: new Date().toISOString(),
+                        project_id: targetPid // Tag with Project ID
                     };
                 }
             });
 
-            // Toplu Yazma (Bu zaten doğruydu)
+            // Toplu Yazma
             if (imageUpdates.length > 0) {
                 await db.files.bulkPut(imageUpdates);
                 processedItems += images.length;
                 setProcessingProgress({ processed: processedItems, total: totalToProcess, phase: 'saving' });
+
+                // UPDATE PROJECT METADATA
+                // 1. Update file count
+                // 2. Set thumbnail if missing
+                // 3. Update 'updated_at'
+                const currentProject = await db.projects.get(targetPid);
+                if (currentProject) {
+                    const changes = {
+                        updated_at: new Date().toISOString(),
+                        file_count: (currentProject.file_count || 0) + images.length
+                    };
+
+                    // If project has no thumbnail, use the first image's thumbnail
+                    if (!currentProject.thumbnail && imageUpdates[0].thumbnail) {
+                        changes.thumbnail = imageUpdates[0].thumbnail;
+                    }
+
+                    await db.projects.update(targetPid, changes);
+                }
             }
 
             // ---------------------------------------------------------
@@ -153,13 +205,14 @@ export function useFileSystem() {
             const incomingLabelBaseNames = labels.map(l => l.baseName);
 
             // Veritabanından etiketlenecek dosyaları TEK SEFERDE çek
-            // Dikkat: Az önce imageUpdates ile DB'yi güncelledik, taze veri çekmeliyiz.
             const freshRecordsArray = await db.files
                 .where('baseName')
                 .anyOf(incomingLabelBaseNames)
                 .toArray();
 
-            const freshMap = new Map(freshRecordsArray.map(rec => [rec.baseName, rec]));
+            const freshInProject = freshRecordsArray.filter(f => f.project_id === targetPid);
+            const freshMap = new Map(freshInProject.map(rec => [rec.baseName, rec]));
+
             const labelUpdates = [];
 
             for (const label of labels) {
@@ -170,7 +223,8 @@ export function useFileSystem() {
                         ...existing,
                         label_data: label.data,
                         path: existing.path || label.path || '',
-                        status: existing.blob ? FileStatus.PENDING : FileStatus.MISSING_IMAGE
+                        status: existing.blob ? FileStatus.PENDING : FileStatus.MISSING_IMAGE,
+                        project_id: targetPid
                     });
                 } else {
                     // Placeholder (Resmi olmayan etiket)
@@ -185,7 +239,8 @@ export function useFileSystem() {
                         width: 0,
                         height: 0,
                         status: FileStatus.MISSING_IMAGE,
-                        created_at: new Date().toISOString()
+                        created_at: new Date().toISOString(),
+                        project_id: targetPid
                     });
                 }
             }
@@ -204,7 +259,7 @@ export function useFileSystem() {
             setError(err.message);
             setIsProcessing(false);
         }
-    }, []);
+    }, [projectId, isValidProject]);
 
     /**
      * Clear all files from the project (Local + Backend)
@@ -273,6 +328,30 @@ export function useFileSystem() {
         // 1. Analyze and Sort Files
         for (const file of filesArray) {
             const filePath = getFilePath(file);
+
+            // Check for video types
+            if (file.type.startsWith('video/') || /\.(mp4|webm|ogg|mov|mkv)$/i.test(file.name)) {
+                console.log(`[FileSystem] Video detected: ${file.name}`);
+                // Videos are large, store directly to DB without worker processing for now
+                // Ideally we might want a thumbnail generator here later
+                const videoData = {
+                    name: file.name,
+                    baseName: file.name,
+                    path: filePath,
+                    type: 'video',
+                    blob: file,
+                    thumbnail: null, // TODO: Generate video thumbnail?
+                    width: 0, // Will be known when loaded
+                    height: 0,
+                    label_data: null,
+                    status: FileStatus.SYNCED, // Videos are local-only for now or considered synced
+                    created_at: new Date().toISOString(),
+                    project_id: (isValidProject) ? projectId : (await db.projects.orderBy('created_at').first())?.id
+                };
+
+                await db.files.add(videoData);
+                continue;
+            }
 
             // Check for image types
             if (file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(file.name)) {
@@ -401,6 +480,13 @@ export function useFileSystem() {
      * Select a file to display on canvas.
      * Loads the full blob/URL and manages memory.
      */
+    // Race condition guard
+    const loadingFileIdRef = useRef(null);
+
+    /**
+     * Select a file to display on canvas.
+     * Loads the full blob/URL and manages memory.
+     */
     const selectFile = useCallback(async (fileId) => {
         if (fileId === activeFileId) return;
 
@@ -410,6 +496,8 @@ export function useFileSystem() {
             activeBlobUrlRef.current = null;
         }
 
+        // 1. Set Loading State & Barrier
+        loadingFileIdRef.current = fileId;
         setActiveFileId(fileId);
 
         if (!fileId) {
@@ -417,8 +505,17 @@ export function useFileSystem() {
             return;
         }
 
+        // 2. Clear old data immediately to prevent ghosting
+        setActiveFileData(null);
+
         try {
             const file = await getFile(fileId);
+
+            // 3. BARRIER CHECK: If user clicked another file while we were waiting, ABORT.
+            if (loadingFileIdRef.current !== fileId) {
+                console.warn(`[RaceCondition] Ignored stale load for ${fileId}, current is ${loadingFileIdRef.current}`);
+                return;
+            }
 
             if (!file) {
                 setActiveFileData(null);
@@ -447,7 +544,10 @@ export function useFileSystem() {
 
         } catch (err) {
             console.error('Error selecting file:', err);
-            setActiveFileData(null);
+            // Only clear if we are still the active requester
+            if (loadingFileIdRef.current === fileId) {
+                setActiveFileData(null);
+            }
         }
     }, [activeFileId, classNames]);
 

@@ -5,7 +5,6 @@ import {
     Undo2, Redo2, Trash2, Download, Upload, ChevronDown,
     Settings, Scan, GraduationCap
 } from 'lucide-react';
-import { useTranslation } from 'react-i18next';
 import { MODEL_CONFIG } from '../../constants/modelConfig';
 
 /**
@@ -42,7 +41,6 @@ const MainToolbar = ({
     filterText,
     onClearFilter
 }) => {
-    const { t, i18n } = useTranslation();
     const annotationInputRef = useRef(null);
     const [isExportExpanded, setIsExportExpanded] = useState(false);
     const [isImportExpanded, setIsImportExpanded] = useState(false);
@@ -113,15 +111,6 @@ const MainToolbar = ({
 
             {/* === LEFT SECTION: Ghost Import Buttons === */}
             <div className="flex items-center gap-1">
-                {/* Language Toggle */}
-                <button
-                    onClick={() => i18n.changeLanguage(i18n.language === 'en' ? 'tr' : 'en')}
-                    className="btn-ghost w-8 h-8 px-0"
-                    title={t('settings.language')}
-                >
-                    <span className="font-semibold text-xs uppercase">{i18n.language}</span>
-                </button>
-
                 {/* Hidden file input */}
                 <input
                     ref={annotationInputRef}

@@ -9,17 +9,16 @@
 
 import React, { useState } from 'react';
 import clsx from 'clsx';
-import { useTranslation } from 'react-i18next';
 import { Settings, Bot, Tag, BarChart3, Image, FileText } from 'lucide-react';
 import PropertiesPanel from './PropertiesPanel';
 import ModelParametersPanel from './ModelParametersPanel';
 import FloatingPanel from './FloatingPanel';
 
 const TABS = [
-    { id: 'properties', labelKey: 'sidebar.properties', icon: Settings },
-    { id: 'stats', labelKey: 'Statistics', icon: BarChart3 },
-    { id: 'model', labelKey: 'sidebar.model', icon: Bot },
-    { id: 'labels', labelKey: 'sidebar.labels', icon: Tag }
+    { id: 'properties', label: 'Properties', icon: Settings },
+    { id: 'stats', label: 'Statistics', icon: BarChart3 },
+    { id: 'model', label: 'Model', icon: Bot },
+    { id: 'labels', label: 'Labels', icon: Tag }
 ];
 
 // Color palette for class distribution bars
@@ -131,11 +130,6 @@ const StatisticsPanel = ({ annotations = [], files = [] }) => {
     );
 };
 
-const LANGUAGES = [
-    { code: 'en', label: 'English' },
-    { code: 'tr', label: 'Türkçe' }
-];
-
 const RightSidebar = ({
     // Properties tab props
     selectedAnn,
@@ -166,7 +160,6 @@ const RightSidebar = ({
     // Statistics props
     files = []
 }) => {
-    const { t } = useTranslation();
     const [activeTab, setActiveTab] = useState('properties');
 
     // Auto-switch to properties when annotation is selected
@@ -192,7 +185,7 @@ const RightSidebar = ({
                                     : "text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary"
                             )}
                             onClick={() => setActiveTab(tab.id)}
-                            title={t(tab.labelKey)}
+                            title={tab.label}
                         >
                             <Icon className="w-4 h-4" />
                         </button>
@@ -222,7 +215,7 @@ const RightSidebar = ({
                     ) : (
                         <div className="flex flex-col items-center justify-center h-full text-theme-secondary p-4">
                             <Settings className="w-10 h-10 mb-2 opacity-50" />
-                            <p className="text-sm text-center">{t('sidebar.selectAnnotation')}</p>
+                            <p className="text-sm text-center">Select an annotation to edit properties</p>
                         </div>
                     )
                 )}
@@ -241,7 +234,7 @@ const RightSidebar = ({
                     ) : (
                         <div className="flex flex-col items-center justify-center h-full text-theme-secondary p-4">
                             <Bot className="w-10 h-10 mb-2 opacity-50" />
-                            <p className="text-sm text-center">{t('sidebar.selectModel')}</p>
+                            <p className="text-sm text-center">Select a model to configure parameters</p>
                         </div>
                     )
                 )}
