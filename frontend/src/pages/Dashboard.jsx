@@ -6,11 +6,13 @@ import { Plus, Play, Cpu, Folder, Clock, Trash2, Download } from 'lucide-react';
 import { createProject, getRecentProjects, deleteProject } from '../db/projectOperations';
 import { exportProjectAsZip } from '../utils/projectExport';
 import ParticleNetwork from '../components/Effects/ParticleNetwork';
+import GlassConfirmModal from '../components/UI/GlassConfirmModal';
 
 const Dashboard = () => {
     const navigate = useNavigate();
     const recentProjects = useLiveQuery(() => getRecentProjects());
     const [isExporting, setIsExporting] = useState(null);
+    const [deleteModal, setDeleteModal] = useState({ isOpen: false, projectId: null });
 
     const handleNewProject = async () => {
         try {
@@ -29,9 +31,14 @@ const Dashboard = () => {
 
     const handleDeleteProject = async (e, id) => {
         e.stopPropagation();
-        if (window.confirm("Bu projeyi ve tüm dosyalarını silmek istediğinizden emin misiniz?")) {
-            await deleteProject(id);
+        setDeleteModal({ isOpen: true, projectId: id });
+    };
+
+    const confirmDeleteProject = async () => {
+        if (deleteModal.projectId) {
+            await deleteProject(deleteModal.projectId);
         }
+        setDeleteModal({ isOpen: false, projectId: null });
     };
 
     const handleExportProject = async (e, project) => {
@@ -186,6 +193,17 @@ const Dashboard = () => {
                     </div>
                 )}
             </div>
+
+            {/* Delete Project Modal */}
+            <GlassConfirmModal
+                isOpen={deleteModal.isOpen}
+                title="Delete Project"
+                message="Bu projeyi ve tüm dosyalarını silmek istediğinizden emin misiniz? Bu işlem geri alınamaz."
+                confirmText="Delete"
+                variant="danger"
+                onConfirm={confirmDeleteProject}
+                onCancel={() => setDeleteModal({ isOpen: false, projectId: null })}
+            />
         </div>
     );
 };

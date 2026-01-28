@@ -9,6 +9,7 @@ import {
     Clock, Monitor, FileWarning, Save, Eraser
 } from 'lucide-react';
 import { FileStatus } from '../../db/index';
+import GlassConfirmModal from '../UI/GlassConfirmModal';
 
 const FileExplorer = ({
     files = [],
@@ -33,6 +34,10 @@ const FileExplorer = ({
     const videoInputRef = useRef(null);
     const [collapsedFolders, setCollapsedFolders] = useState(new Set());
 
+    // Modal states for replacing native window.confirm
+    const [deleteModal, setDeleteModal] = useState({ isOpen: false, type: null, fileId: null, fileName: null });
+    const [clearModal, setClearModal] = useState({ isOpen: false, type: null });
+
     // Keyboard handler for navigation and shortcuts
     useEffect(() => {
         const handleKeyDown = (e) => {
@@ -43,13 +48,11 @@ const FileExplorer = ({
             if ((e.key === 'Delete' || e.key === 'Backspace') && selectedFileIds.size > 0) {
                 e.preventDefault();
                 const count = selectedFileIds.size;
-                const message = count > 1
-                    ? `Delete ${count} selected files?`
-                    : 'Delete selected file?';
-
-                if (window.confirm(message)) {
-                    onRemoveSelectedFiles && onRemoveSelectedFiles();
-                }
+                setDeleteModal({
+                    isOpen: true,
+                    type: 'bulk',
+                    count: count
+                });
                 return;
             }
 
@@ -273,14 +276,14 @@ const FileExplorer = ({
                 </div>
                 <div className="flex gap-1">
                     <button
-                        onClick={() => { if (window.confirm('Clear all labels? Images will be kept.')) onClearLabels(); }}
+                        onClick={() => setClearModal({ isOpen: true, type: 'labels' })}
                         className="p-1.5 rounded-lg text-yellow-500/70 hover:text-yellow-500 hover:bg-yellow-500/10 transition-colors"
                         title="Clear All Labels"
                     >
                         <Eraser className="w-3.5 h-3.5" />
                     </button>
                     <button
-                        onClick={() => { if (window.confirm('Clear everything (Images + Labels)?')) onClearAll(); }}
+                        onClick={() => setClearModal({ isOpen: true, type: 'all' })}
                         className="p-1.5 rounded-lg text-red-400/70 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                         title="Clear Project"
                     >
@@ -431,37 +434,44 @@ const FileExplorer = ({
                             return (
                                 <div
                                     className={clsx(
-                                        "group flex items-center gap-3 py-2 cursor-pointer transition-all duration-150 mx-2 my-0.5 rounded-lg",
-                                        isActive && "file-item-active pl-2",
-                                        isSelected && !isActive && "bg-[var(--accent-indigo)]/15 border-l-4 border-[var(--accent-indigo)]/50 pl-2",
-                                        !isSelected && !isActive && "hover:bg-[var(--bg-tertiary)] pl-3 border-l-4 border-transparent"
+                                        "group flex items-center gap-3 p-2 cursor-pointer transition-all duration-200 mx-2 my-0.5 rounded-lg border",
+                                        isActive
+                                            ? "bg-indigo-500/10 border-indigo-500/30 shadow-[0_0_15px_rgba(99,102,241,0.15)]"
+                                            : isSelected
+                                                ? "bg-indigo-500/5 border-indigo-500/20"
+                                                : "border-transparent hover:bg-white/5 hover:border-white/5"
                                     )}
                                     onClick={(e) => onFileClick ? onFileClick(file.id, e) : onSelectFile(file.id)}
                                 >
-                                    {/* 16:9 Thumbnail */}
-                                    <div className="thumbnail-16-9 w-20 flex-shrink-0 flex items-center justify-center border border-[var(--border-subtle)] bg-black/20">
+                                    {/* Premium Thumbnail */}
+                                    <div className="relative w-10 h-10 rounded-md overflow-hidden bg-slate-800 border border-white/10 shrink-0">
                                         {file.type === 'video' ? (
-                                            <Monitor className="w-8 h-8 text-purple-500" />
+                                            <div className="flex items-center justify-center h-full">
+                                                <Monitor className="w-5 h-5 text-purple-500" />
+                                            </div>
                                         ) : file.thumbnail ? (
-                                            <img src={file.thumbnail} alt="" className="w-full h-full object-cover" />
+                                            <img
+                                                src={file.thumbnail}
+                                                alt=""
+                                                className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+                                            />
                                         ) : (
-                                            <Image className="w-5 h-5 text-[var(--text-muted)]" />
+                                            <div className="flex items-center justify-center h-full">
+                                                <Image className="w-5 h-5 text-slate-500" />
+                                            </div>
                                         )}
                                     </div>
+
+                                    {/* File Info */}
                                     <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-1">
-                                            <span className="text-xs font-medium text-[var(--text-primary)] truncate">{file.name}</span>
-                                            <button
-                                                className="p-0.5 opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    if (window.confirm(`Remove ${file.name}?`)) onRemoveFile(file.id);
-                                                }}
-                                            >
-                                                <X className="w-3 h-3" />
-                                            </button>
-                                        </div>
-                                        <div className="flex items-center gap-1.5 mt-1">
+                                        <h4 className={clsx(
+                                            "text-sm truncate transition-colors",
+                                            isActive ? "text-indigo-200 font-medium" : "text-slate-300 group-hover:text-white"
+                                        )}>
+                                            {file.name}
+                                        </h4>
+                                        <div className="flex items-center gap-2 text-[10px] text-slate-500 mt-0.5">
+                                            {/* Status Dot */}
                                             <span
                                                 onClick={(e) => {
                                                     if (hasError) {
@@ -469,19 +479,87 @@ const FileExplorer = ({
                                                         onRetryFile(file.id);
                                                     }
                                                 }}
-                                                className={hasError ? 'cursor-pointer' : ''}
-                                            >
-                                                {getStatusIcon(file.status)}
-                                            </span>
-                                            {file.label_data && <FileText className="w-3 h-3 text-[var(--accent-emerald)]" title="Has Labels" />}
+                                                className={clsx(
+                                                    "w-1.5 h-1.5 rounded-full",
+                                                    file.status === FileStatus.SYNCED && "bg-emerald-500 shadow-emerald-500/50 shadow-sm",
+                                                    file.status === FileStatus.PENDING && "bg-amber-500",
+                                                    file.status === FileStatus.SYNCING && "bg-blue-400 animate-pulse",
+                                                    file.status === FileStatus.ERROR && "bg-red-500 cursor-pointer",
+                                                    !file.status && "bg-slate-600"
+                                                )}
+                                            />
+                                            {file.label_data && (
+                                                <span className="flex items-center gap-0.5 text-emerald-400">
+                                                    <FileText className="w-2.5 h-2.5" />
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
+
+                                    {/* Delete Button */}
+                                    <button
+                                        className="p-1.5 opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-all"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setDeleteModal({
+                                                isOpen: true,
+                                                type: 'single',
+                                                fileId: file.id,
+                                                fileName: file.name
+                                            });
+                                        }}
+                                    >
+                                        <X className="w-3.5 h-3.5" />
+                                    </button>
                                 </div>
                             );
                         }}
                     />
                 )}
             </div>
+
+            {/* Delete Single/Bulk Modal */}
+            <GlassConfirmModal
+                isOpen={deleteModal.isOpen}
+                title={deleteModal.type === 'bulk' ? `Delete ${deleteModal.count} Files` : "Delete File"}
+                message={deleteModal.type === 'bulk'
+                    ? `Are you sure you want to delete ${deleteModal.count} selected files? This action cannot be undone.`
+                    : `Are you sure you want to delete "${deleteModal.fileName}"?`
+                }
+                confirmText="Delete"
+                variant="danger"
+                onConfirm={() => {
+                    if (deleteModal.type === 'bulk') {
+                        onRemoveSelectedFiles && onRemoveSelectedFiles();
+                    } else {
+                        onRemoveFile && onRemoveFile(deleteModal.fileId);
+                    }
+                    setDeleteModal({ isOpen: false, type: null, fileId: null, fileName: null });
+                }}
+                onCancel={() => setDeleteModal({ isOpen: false, type: null, fileId: null, fileName: null })}
+            />
+
+            {/* Clear Labels/All Modal */}
+            <GlassConfirmModal
+                isOpen={clearModal.isOpen}
+                title={clearModal.type === 'labels' ? "Clear All Labels" : "Clear Project"}
+                message={clearModal.type === 'labels'
+                    ? "This will remove all labels from your images. The images themselves will be kept."
+                    : "This will remove all images and labels from your project. This action cannot be undone."
+                }
+                confirmText={clearModal.type === 'labels' ? "Clear Labels" : "Clear All"}
+                variant={clearModal.type === 'labels' ? "warning" : "danger"}
+                icon={clearModal.type === 'labels' ? Eraser : Trash2}
+                onConfirm={() => {
+                    if (clearModal.type === 'labels') {
+                        onClearLabels && onClearLabels();
+                    } else {
+                        onClearAll && onClearAll();
+                    }
+                    setClearModal({ isOpen: false, type: null });
+                }}
+                onCancel={() => setClearModal({ isOpen: false, type: null })}
+            />
         </div>
     );
 };

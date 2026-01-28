@@ -3,8 +3,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import axios from 'axios';
 import * as turf from '@turf/turf';
-import { ArrowLeft, Upload, Download, ChevronDown, MoreVertical, Save, Trash2, Archive, FileJson } from 'lucide-react';
+import { ArrowLeft, Upload, Download, ChevronDown, MoreVertical, Save, Trash2, Archive, FileJson, AlertTriangle } from 'lucide-react';
 import '../App.css';
+import GlassConfirmModal from '../components/UI/GlassConfirmModal';
 
 // Custom Hooks
 import { useStageSystem } from '../hooks/useStageSystem';
@@ -57,6 +58,11 @@ function Editor() {
     const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
     const [isZipExporting, setIsZipExporting] = useState(false);
     const projectMenuRef = useRef(null);
+
+    // Modal states for confirm dialogs
+    const [deleteProjectModal, setDeleteProjectModal] = useState(false);
+    const [saveModal, setSaveModal] = useState({ isOpen: false, step: 'confirm' });
+    const [confirmAugment, setConfirmAugment] = useState(false);
 
     // Fetch project name on mount
     useEffect(() => {
@@ -132,13 +138,11 @@ function Editor() {
     };
 
     const handleDeleteThisProject = async () => {
-        if (window.confirm("Bu projeyi ve tüm dosyalarını silmek istediğinizden emin misiniz?")) {
-            try {
-                await deleteProject(projectId);
-                navigate('/');
-            } catch (err) {
-                alert("Silme işlemi başarısız: " + err.message);
-            }
+        try {
+            await deleteProject(projectId);
+            navigate('/');
+        } catch (err) {
+            alert("Silme işlemi başarısız: " + err.message);
         }
     };
 
@@ -218,17 +222,13 @@ function Editor() {
     // ACTIONS & EVENT HANDLERS
     // ============================================
 
-    const handleSaveAll = useCallback(async () => {
+    const handleSaveAll = useCallback(async (doAugment = false) => {
         try {
             if (!fileSystem.files || fileSystem.files.length === 0) {
                 setSaveMessage({ type: 'info', text: 'No files to save.' });
                 setTimeout(() => setSaveMessage(null), 2000);
                 return;
             }
-
-            if (!window.confirm(`Save ${fileSystem.files.length} images to backend dataset?`)) return;
-
-            const doAugment = window.confirm("Enable Data Augmentation (Flip, Noise, Dark)?\nThis will generate extra images for training.");
 
             const result = await fileSystem.saveProjectToBackend(doAugment);
 
@@ -243,6 +243,15 @@ function Editor() {
             setSaveMessage({ type: 'error', text: 'Failed to save: ' + err.message });
         }
     }, [fileSystem]);
+
+    const handleSaveWithConfirm = useCallback(() => {
+        if (!fileSystem.files || fileSystem.files.length === 0) {
+            setSaveMessage({ type: 'info', text: 'No files to save.' });
+            setTimeout(() => setSaveMessage(null), 2000);
+            return;
+        }
+        setSaveModal({ isOpen: true, step: 'confirm' });
+    }, [fileSystem.files]);
 
     const handleExport = useCallback(async (format) => {
         try {
@@ -571,7 +580,7 @@ function Editor() {
                     {isProjectMenuOpen && (
                         <div className="absolute top-full right-0 mt-1 w-48 bg-theme-secondary border border-theme rounded-xl shadow-2xl z-[100] py-2 overflow-hidden backdrop-blur-md">
                             <button
-                                onClick={() => { handleSaveAll(); setIsProjectMenuOpen(false); }}
+                                onClick={() => { handleSaveWithConfirm(); setIsProjectMenuOpen(false); }}
                                 className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-theme-accent/20 hover:text-white transition-colors"
                             >
                                 <Save size={14} className="text-emerald-400" />
@@ -597,7 +606,7 @@ function Editor() {
                                 <span>Download as ZIP</span>
                             </button>
                             <button
-                                onClick={() => { handleDeleteThisProject(); setIsProjectMenuOpen(false); }}
+                                onClick={() => { setDeleteProjectModal(true); setIsProjectMenuOpen(false); }}
                                 className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
                             >
                                 <Trash2 size={14} />
@@ -648,7 +657,7 @@ function Editor() {
                                 onClearLabels={fileSystem.clearAllLabels}
                                 onRemoveFile={fileSystem.removeFile}
                                 onRemoveSelectedFiles={fileSystem.removeSelectedFiles}
-                                onSaveAll={handleSaveAll}
+                                onSaveAll={handleSaveWithConfirm}
                                 isProcessing={fileSystem.isProcessing}
                                 processingProgress={fileSystem.processingProgress}
                                 onExportProject={() => setShowExportModal(true)}
@@ -763,6 +772,52 @@ function Editor() {
                     return sum;
                 }, 0)}
                 mode="batch"
+            />
+
+            {/* Delete Project Modal */}
+            <GlassConfirmModal
+                isOpen={deleteProjectModal}
+                title="Delete Project"
+                message="Bu projeyi ve tüm dosyalarını silmek istediğinizden emin misiniz? Bu işlem geri alınamaz."
+                confirmText="Delete"
+                variant="danger"
+                onConfirm={() => {
+                    setDeleteProjectModal(false);
+                    handleDeleteThisProject();
+                }}
+                onCancel={() => setDeleteProjectModal(false)}
+            />
+
+            {/* Save Confirmation Modal */}
+            <GlassConfirmModal
+                isOpen={saveModal.isOpen && saveModal.step === 'confirm'}
+                title="Save to Backend"
+                message={`Save ${fileSystem.files?.length || 0} images to backend dataset?`}
+                confirmText="Continue"
+                variant="info"
+                icon={Save}
+                onConfirm={() => {
+                    setSaveModal({ isOpen: true, step: 'augment' });
+                }}
+                onCancel={() => setSaveModal({ isOpen: false, step: 'confirm' })}
+            />
+
+            {/* Augmentation Option Modal */}
+            <GlassConfirmModal
+                isOpen={saveModal.isOpen && saveModal.step === 'augment'}
+                title="Data Augmentation"
+                message="Enable Data Augmentation (Flip, Noise, Dark)? This will generate extra images for training."
+                confirmText="Enable Augmentation"
+                cancelText="Skip"
+                variant="info"
+                onConfirm={() => {
+                    setSaveModal({ isOpen: false, step: 'confirm' });
+                    handleSaveAll(true);
+                }}
+                onCancel={() => {
+                    setSaveModal({ isOpen: false, step: 'confirm' });
+                    handleSaveAll(false);
+                }}
             />
         </div>
     );

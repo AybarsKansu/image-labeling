@@ -273,6 +273,29 @@ body {
   color: var(--text-muted);
 }
 
+/* Premium Input - Cyberpunk/SaaS style with glow */
+.input-premium {
+  width: 100%;
+  background: rgba(2, 6, 23, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-base);
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  transition: all 0.3s ease;
+}
+
+.input-premium::placeholder {
+  color: var(--text-muted);
+}
+
+.input-premium:focus {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.5);
+  background: rgba(15, 23, 42, 0.8);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
 /* Input with left icon */
 .input-with-icon {
   padding-left: 2.25rem;
