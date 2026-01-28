@@ -6,6 +6,7 @@ import { stringToColor } from '../../utils/helpers';
 /**
  * FloatingPanel Component
  * Panel showing label statistics with Rename capabilities.
+ * Figma-inspired minimalist design with Slate-950 palette.
  */
 const FloatingPanel = ({
     annotations,
@@ -95,8 +96,8 @@ const FloatingPanel = ({
     return (
         <div
             className={clsx(
-                "flex flex-col bg-[#161922] text-gray-200",
-                docked ? "h-full" : "fixed rounded-lg border border-gray-700 shadow-xl"
+                "flex flex-col bg-[var(--bg-secondary)] text-[var(--text-primary)]",
+                docked ? "h-full" : "fixed rounded-lg border border-[var(--border-subtle)] shadow-xl"
             )}
             style={docked ? {} : {
                 left: panelPos.x,
@@ -108,52 +109,52 @@ const FloatingPanel = ({
             {/* Header */}
             <div
                 className={clsx(
-                    "flex items-center gap-2 px-3 py-2.5 border-b border-gray-700",
+                    "flex items-center gap-2 px-3 py-2.5 border-b border-[var(--border-subtle)]",
                     !docked && "cursor-move"
                 )}
                 onMouseDown={handleDragStart}
             >
-                <Tag className="w-4 h-4 text-indigo-400" />
-                <span className="text-sm font-semibold text-white">Project Labels</span>
+                <Tag className="w-3.5 h-3.5 text-[var(--accent-indigo)]" />
+                <span className="text-xs font-semibold text-[var(--text-primary)]">Project Labels</span>
             </div>
 
-            {/* Filter */}
-            <div className="px-3 py-2 border-b border-gray-700">
+            {/* Sleek Search Bar */}
+            <div className="px-3 py-2.5 border-b border-[var(--border-subtle)]">
                 <div className="relative">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />
                     <input
                         type="text"
                         placeholder="Search labels..."
                         value={filterText}
                         onChange={(e) => setFilterText(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1.5 bg-gray-800 border border-gray-600 rounded-lg text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        className="input-dark input-with-icon w-full h-8 text-xs"
                     />
                 </div>
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-auto scrollbar-dark p-2 space-y-1">
+            <div className="flex-1 overflow-auto custom-scrollbar p-2 space-y-0.5">
                 {labelStats.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-gray-500 py-4">
-                        <Tag className="w-8 h-8 mb-2 opacity-50" />
-                        <p className="text-sm">No labels detected</p>
+                    <div className="flex flex-col items-center justify-center h-full text-[var(--text-muted)] py-6">
+                        <Tag className="w-8 h-8 mb-2 opacity-30" strokeWidth={1} />
+                        <p className="text-xs">No labels detected</p>
                     </div>
                 ) : (
                     labelStats.map(([label, count]) => (
                         <div
                             key={label}
-                            className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-gray-800/50 transition-colors group"
+                            className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-[var(--bg-tertiary)] transition-colors group"
                             onClick={() => onSelectLabel && onSelectLabel(label)}
                         >
                             <div
-                                className="w-3 h-3 rounded-full flex-shrink-0"
+                                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                                 style={{ background: stringToColor(label) }}
                             />
 
                             {editingLabel === label ? (
                                 <input
                                     autoFocus
-                                    className="flex-1 px-2 py-0.5 bg-gray-700 border border-indigo-500 rounded text-sm text-white focus:outline-none"
+                                    className="flex-1 px-2 py-0.5 bg-[var(--bg-tertiary)] border border-[var(--accent-indigo)] rounded text-xs text-[var(--text-primary)] focus:outline-none"
                                     value={newLabelValue}
                                     onChange={(e) => setNewLabelValue(e.target.value)}
                                     onBlur={submitRename}
@@ -161,13 +162,13 @@ const FloatingPanel = ({
                                     onClick={(e) => e.stopPropagation()}
                                 />
                             ) : (
-                                <span className="flex-1 text-sm text-gray-300 truncate">{label}</span>
+                                <span className="flex-1 text-xs text-[var(--text-secondary)] truncate">{label}</span>
                             )}
 
-                            <div className="flex items-center gap-1.5">
-                                <span className="text-xs text-gray-500 bg-gray-800 px-1.5 py-0.5 rounded">{count}</span>
+                            <div className="flex items-center gap-1">
+                                <span className="text-[10px] text-[var(--text-muted)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">{count}</span>
                                 <button
-                                    className="p-1 opacity-0 group-hover:opacity-100 text-gray-400 hover:text-indigo-400 transition-all"
+                                    className="p-0.5 opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-[var(--accent-indigo)] transition-all"
                                     onClick={(e) => startEditing(e, label)}
                                     title="Rename globally"
                                 >
@@ -180,8 +181,8 @@ const FloatingPanel = ({
             </div>
 
             {/* Footer */}
-            <div className="px-3 py-2 text-xs text-gray-500 border-t border-gray-700 text-center">
-                Total: {annotations.length} instances
+            <div className="px-3 py-2 text-[10px] text-[var(--text-muted)] border-t border-[var(--border-subtle)] text-center">
+                {annotations.length} instances • {labelStats.length} classes
             </div>
 
             {!docked && (
@@ -195,3 +196,4 @@ const FloatingPanel = ({
 };
 
 export default FloatingPanel;
+

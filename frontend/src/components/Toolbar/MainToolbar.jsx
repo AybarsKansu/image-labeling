@@ -2,81 +2,66 @@ import React, { useRef, useState, useEffect } from 'react';
 import clsx from 'clsx';
 import {
     MousePointer, Hand, Square, Pentagon, Pencil, Bot, Scissors, Eraser,
-    Undo2, Redo2, Trash2, Download, Upload, ChevronDown, ChevronLeft,
-    ChevronRight, Settings, Scan, GraduationCap
+    Undo2, Redo2, Trash2, Download, Upload, ChevronDown,
+    Settings, Scan, GraduationCap
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { MODEL_CONFIG } from '../../constants/modelConfig';
 
 /**
  * MainToolbar Component
- * Top toolbar with file input, tools, AI controls, and actions
+ * Slim, sophisticated header with sub-divided layout
+ * - Left: Ghost-style Import buttons
+ * - Center: Grouped Annotation Toolkit
+ * - Right: Glowing action buttons
  */
 const MainToolbar = ({
-    // Image
     imageFile,
-    onImageUpload,
-    onCloseImage,
-
-    // Tool state
     tool,
     setTool,
     eraserSize,
     setEraserSize,
-
     textPrompt,
     setTextPrompt,
-
-    // AI Models
     models,
     selectedModel,
     onSelectModel,
     onOpenModelManager,
     onOpenTrainModal,
-
-    // Actions
     onDetectAll,
     onUndo,
     onRedo,
     onClearAll,
     canUndo,
     canRedo,
-
-    // Load/Export handlers
     onLoadAnnotations,
     onExport,
     onExportCurrent,
-
-    // State for panel toggles
-    isLeftPanelOpen,
-    isRightPanelOpen,
-    onToggleLeftPanel,
-    onToggleRightPanel,
-
-    // Status
     isProcessing,
     saveMessage
 }) => {
-    const { t } = useTranslation();
-    const fileInputRef = useRef(null);
+    const { t, i18n } = useTranslation();
     const annotationInputRef = useRef(null);
-    const [isToolsExpanded, setIsToolsExpanded] = useState(false);
     const [isExportExpanded, setIsExportExpanded] = useState(false);
     const [isImportExpanded, setIsImportExpanded] = useState(false);
     const [loadFormat, setLoadFormat] = useState('toon');
-    const dropdownRef = useRef(null);
     const exportDropdownRef = useRef(null);
     const importDropdownRef = useRef(null);
 
-    const tools = [
-        { id: 'select', icon: MousePointer, label: t('toolbar.select') },
-        { id: 'pan', icon: Hand, label: t('toolbar.pan') },
-        { id: 'box', icon: Square, label: t('toolbar.box') },
-        { id: 'poly', icon: Pentagon, label: t('toolbar.polygon') },
-        { id: 'pen', icon: Pencil, label: t('toolbar.pen') },
-        { id: 'ai-box', icon: Bot, label: t('toolbar.aiBox') },
-        { id: 'knife', icon: Scissors, label: t('toolbar.knife') },
-        { id: 'eraser', icon: Eraser, label: t('toolbar.eraser') }
+    // Annotation toolkit - core tools
+    const coreTools = [
+        { id: 'select', icon: MousePointer, label: 'Select' },
+        { id: 'box', icon: Square, label: 'Box' },
+        { id: 'poly', icon: Pentagon, label: 'Polygon' },
+        { id: 'pen', icon: Pencil, label: 'Brush' },
+    ];
+
+    // Secondary tools
+    const secondaryTools = [
+        { id: 'pan', icon: Hand, label: 'Pan' },
+        { id: 'ai-box', icon: Bot, label: 'AI Box' },
+        { id: 'knife', icon: Scissors, label: 'Knife' },
+        { id: 'eraser', icon: Eraser, label: 'Eraser' }
     ];
 
     const exportFormats = [
@@ -93,15 +78,9 @@ const MainToolbar = ({
         { id: 'voc', label: 'Pascal VOC (.xml)', ext: '.xml' }
     ];
 
-    const activeToolObj = tools.find(t => t.id === tool) || tools[0];
-    const ActiveIcon = activeToolObj.icon;
-
-    // Close dropdown when clicking outside
+    // Close dropdowns on outside click
     useEffect(() => {
         const handleClickOutside = (event) => {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-                setIsToolsExpanded(false);
-            }
             if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target)) {
                 setIsExportExpanded(false);
             }
@@ -110,294 +89,253 @@ const MainToolbar = ({
             }
         };
 
-        if (isToolsExpanded || isExportExpanded || isImportExpanded) {
+        if (isExportExpanded || isImportExpanded) {
             document.addEventListener('mousedown', handleClickOutside);
         }
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
-    }, [isToolsExpanded, isExportExpanded, isImportExpanded]);
-
-    const handleToolSelect = (toolId) => {
-        setTool(toolId);
-        setIsToolsExpanded(false);
-    };
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isExportExpanded, isImportExpanded]);
 
     const handleImportClick = (format) => {
         setLoadFormat(format);
         setIsImportExpanded(false);
-        setTimeout(() => {
-            if (annotationInputRef.current) {
-                annotationInputRef.current.click();
-            }
-        }, 0);
-    };
-
-    const handleExportClick = (format) => {
-        if (onExport) {
-            onExport(format);
-        }
-        setIsExportExpanded(false);
+        setTimeout(() => annotationInputRef.current?.click(), 0);
     };
 
     const handleExportCurrentClick = (format) => {
-        if (onExportCurrent) {
-            onExportCurrent(format);
-        }
+        onExportCurrent?.(format);
         setIsExportExpanded(false);
     };
 
-    // Reusable button styles
-    const btnBase = "flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 h-10";
-    const btnDefault = "bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white";
-    const btnAccent = "bg-indigo-600 text-white hover:bg-indigo-500";
-    const btnDanger = "bg-red-600/20 text-red-400 hover:bg-red-600/40 hover:text-red-300";
-    const btnDisabled = "opacity-50 cursor-not-allowed";
-
     return (
-        <div className="flex items-center gap-4 px-4 py-3 bg-secondary border-b border-border min-h-[72px]">
+        <div className="flex items-center gap-2 px-4 h-12 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)]">
 
-            {/* Import Section */}
-            <input
-                ref={annotationInputRef}
-                type="file"
-                accept={loadFormats.find(f => f.id === loadFormat)?.ext || '.toon,.json,.txt,.xml'}
-                onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
+            {/* === LEFT SECTION: Ghost Import Buttons === */}
+            <div className="flex items-center gap-1">
+                {/* Language Toggle */}
+                <button
+                    onClick={() => i18n.changeLanguage(i18n.language === 'en' ? 'tr' : 'en')}
+                    className="btn-ghost w-8 h-8 px-0"
+                    title={t('settings.language')}
+                >
+                    <span className="font-semibold text-xs uppercase">{i18n.language}</span>
+                </button>
 
-                    const currentFormat = loadFormats.find(f => f.id === loadFormat);
-                    const expectedExts = currentFormat?.ext.split(',').map(e => e.trim().toLowerCase()) || [];
-                    const fileExt = '.' + file.name.split('.').pop().toLowerCase();
-                    const isValid = expectedExts.some(ext => ext === fileExt);
-
-                    if (!isValid) {
-                        alert(`Invalid file type!\nSelected format: ${currentFormat?.label}\nExpected extensions: ${currentFormat?.ext}\nYour file: ${file.name}`);
+                {/* Hidden file input */}
+                <input
+                    ref={annotationInputRef}
+                    type="file"
+                    accept={loadFormats.find(f => f.id === loadFormat)?.ext || '.toon,.json,.txt,.xml'}
+                    onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        onLoadAnnotations?.(file, loadFormat);
                         e.target.value = '';
-                        return;
-                    }
+                    }}
+                    style={{ display: 'none' }}
+                />
 
-                    if (onLoadAnnotations) {
-                        onLoadAnnotations(file, loadFormat);
-                    }
-                    e.target.value = '';
-                }}
-                style={{ display: 'none' }}
-            />
+                {/* Import Dropdown */}
+                <div className="relative" ref={importDropdownRef}>
+                    <button
+                        className={clsx("btn-ghost", !imageFile && "opacity-40 pointer-events-none")}
+                        onClick={() => setIsImportExpanded(!isImportExpanded)}
+                        disabled={!imageFile}
+                    >
+                        <Upload size={14} />
+                        <span>Import</span>
+                    </button>
 
-            <div className="relative" ref={importDropdownRef}>
-                <button
-                    className={clsx(btnBase, btnDefault, isImportExpanded && "bg-gray-700", !imageFile && btnDisabled)}
-                    onClick={() => setIsImportExpanded(!isImportExpanded)}
-                    disabled={!imageFile}
-                    title={t('toolbar.import')}
-                >
-                    <Upload size={16} />
-                    <span className="hidden sm:inline">{t('toolbar.import')}</span>
-                    <ChevronDown size={14} />
-                </button>
-
-                {isImportExpanded && (
-                    <div className="absolute top-full left-0 mt-1 bg-tertiary border border-border rounded-lg shadow-xl z-50 min-w-[160px] py-1">
-                        {loadFormats.map(f => (
-                            <button
-                                key={f.id}
-                                className="w-full px-3 py-2 text-left text-sm text-txt-dim hover:bg-accent/30 hover:text-white transition-colors"
-                                onClick={() => handleImportClick(f.id)}
-                            >
-                                {f.label}
-                            </button>
-                        ))}
-                    </div>
-                )}
-            </div>
-
-            {/* Divider */}
-            <div className="w-px h-6 bg-border" />
-
-            {/* Tool Selector Dropdown */}
-            <div className="relative" ref={dropdownRef}>
-                <button
-                    className={clsx(
-                        "flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all",
-                        "bg-gray-800 text-gray-200 hover:bg-gray-700",
-                        isToolsExpanded && "ring-2 ring-indigo-500"
-                    )}
-                    onClick={() => setIsToolsExpanded(!isToolsExpanded)}
-                >
-                    <ActiveIcon size={18} className="text-indigo-400" />
-                    <span className="text-sm font-medium hidden sm:inline">{activeToolObj.label}</span>
-                    <ChevronDown size={14} className={clsx("transition-transform", isToolsExpanded && "rotate-180")} />
-                </button>
-
-                {isToolsExpanded && (
-                    <div className="absolute top-full left-0 mt-1 bg-tertiary border border-border rounded-lg shadow-xl z-50 min-w-[140px] py-1">
-                        {tools.map(t => {
-                            const Icon = t.icon;
-                            return (
+                    {isImportExpanded && (
+                        <div className="absolute top-full left-0 mt-1 bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-lg shadow-xl z-50 min-w-[140px] py-1">
+                            {loadFormats.map(f => (
                                 <button
-                                    key={t.id}
-                                    className={clsx(
-                                        "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors",
-                                        tool === t.id
-                                            ? "bg-accent/40 text-accent-light"
-                                            : "text-txt-dim hover:bg-tertiary-light"
-                                    )}
-                                    onClick={() => handleToolSelect(t.id)}
+                                    key={f.id}
+                                    className="w-full px-3 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--accent-color)] hover:text-white transition-colors"
+                                    onClick={() => handleImportClick(f.id)}
                                 >
-                                    <Icon size={16} />
-                                    <span>{t.label}</span>
+                                    {f.label}
                                 </button>
-                            );
-                        })}
-                    </div>
-                )}
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Export Dropdown */}
+                <div className="relative" ref={exportDropdownRef}>
+                    <button
+                        className={clsx("btn-ghost", !imageFile && "opacity-40 pointer-events-none")}
+                        onClick={() => setIsExportExpanded(!isExportExpanded)}
+                        disabled={!imageFile}
+                    >
+                        <Download size={14} />
+                        <span>Export</span>
+                    </button>
+
+                    {isExportExpanded && (
+                        <div className="absolute top-full left-0 mt-1 bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-lg shadow-xl z-50 min-w-[140px] py-1">
+                            {exportFormats.map(f => (
+                                <button
+                                    key={f.id}
+                                    className="w-full px-3 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--accent-color)] hover:text-white transition-colors"
+                                    onClick={() => handleExportCurrentClick(f.id)}
+                                >
+                                    {f.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
 
-            {/* Text Prompt Input */}
-            <input
-                type="text"
-                className="px-3 py-1.5 bg-gray-800 border border-border rounded-lg text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent w-40 sm:w-52"
-                placeholder={t('toolbar.classPrompt')}
-                value={textPrompt}
-                onChange={(e) => setTextPrompt(e.target.value)}
-            />
+            {/* Divider */}
+            <div className="w-px h-5 bg-[var(--border-subtle)]" />
 
-            {/* Eraser Size Slider */}
-            {tool === 'eraser' && (
-                <div className="flex items-center gap-2 text-sm text-gray-400">
-                    <span>Size: {eraserSize}px</span>
-                    <input
-                        type="range"
-                        min="5"
-                        max="100"
-                        value={eraserSize}
-                        onChange={(e) => setEraserSize(parseInt(e.target.value))}
-                        className="w-20 accent-indigo-500"
-                    />
+            {/* === CENTER SECTION: Annotation Toolkit === */}
+            <div className="flex items-center gap-2 flex-1 justify-center">
+                {/* Core Tools Group */}
+                <div className="toolbar-group">
+                    {coreTools.map(t => {
+                        const Icon = t.icon;
+                        return (
+                            <button
+                                key={t.id}
+                                className={clsx("toolbar-group-item", tool === t.id && "active")}
+                                onClick={() => setTool(t.id)}
+                                title={t.label}
+                            >
+                                <Icon size={16} />
+                            </button>
+                        );
+                    })}
                 </div>
-            )}
 
-            {/* Divider */}
-            <div className="w-px h-6 bg-border" />
+                {/* Secondary Tools Group */}
+                <div className="toolbar-group">
+                    {secondaryTools.map(t => {
+                        const Icon = t.icon;
+                        return (
+                            <button
+                                key={t.id}
+                                className={clsx("toolbar-group-item", tool === t.id && "active")}
+                                onClick={() => setTool(t.id)}
+                                title={t.label}
+                            >
+                                <Icon size={16} />
+                            </button>
+                        );
+                    })}
+                </div>
 
-            {/* AI Actions */}
-            <button
-                className={clsx(btnBase, btnAccent, (isProcessing || !imageFile) && btnDisabled)}
-                onClick={onDetectAll}
-                disabled={isProcessing || !imageFile}
-                title={textPrompt?.trim() ? t('toolbar.segment') : t('toolbar.detect')}
-            >
-                {isProcessing ? (
-                    <div className="spinner w-4 h-4" />
-                ) : (
-                    <Scan size={16} />
+                {/* Eraser Size Slider */}
+                {tool === 'eraser' && (
+                    <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                        <span>{eraserSize}px</span>
+                        <input
+                            type="range"
+                            min="5"
+                            max="100"
+                            value={eraserSize}
+                            onChange={(e) => setEraserSize(parseInt(e.target.value))}
+                            className="w-16 accent-[var(--accent-color)]"
+                        />
+                    </div>
                 )}
-                <span className="hidden sm:inline">
-                    {textPrompt?.trim() ? t('toolbar.segment') : t('toolbar.detect')}
-                </span>
-            </button>
 
-            {/* Model Dropdown */}
-            <select
-                className="px-2 py-1.5 bg-gray-800 border border-gray-600 rounded-lg text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer max-w-[140px]"
-                value={selectedModel || ''}
-                onChange={(e) => onSelectModel && onSelectModel(e.target.value)}
-            >
-                <option value="" disabled hidden>Select Model...</option>
-                {models && models.map(model => (
-                    <option key={model.id} value={model.id}>
-                        {model.name}
-                    </option>
-                ))}
-            </select>
+                {/* Class Prompt Input */}
+                <input
+                    type="text"
+                    className="input-dark w-36 h-8 text-xs"
+                    placeholder="Class (e.g., car)"
+                    value={textPrompt}
+                    onChange={(e) => setTextPrompt(e.target.value)}
+                />
 
-            <button
-                className={clsx(btnBase, "bg-transparent text-txt-dim hover:text-white p-1.5")}
-                onClick={onOpenModelManager}
-                title={t('modals.manageModels')}
-            >
-                <Settings size={18} />
-            </button>
-
-            {/* Divider */}
-            <div className="w-px h-6 bg-border" />
-
-            {/* Edit Actions */}
-            <button
-                className={clsx(btnBase, btnDefault, !canUndo && btnDisabled)}
-                onClick={onUndo}
-                disabled={!canUndo}
-                title={t('toolbar.undo')}
-            >
-                <Undo2 size={16} />
-            </button>
-            <button
-                className={clsx(btnBase, btnDefault, !canRedo && btnDisabled)}
-                onClick={onRedo}
-                disabled={!canRedo}
-                title="Redo (Ctrl+Y)"
-            >
-                <Redo2 size={16} />
-            </button>
-            <button
-                className={clsx(btnBase, btnDanger)}
-                onClick={onClearAll}
-                title={t('toolbar.clearAll')}
-            >
-                <Trash2 size={16} />
-            </button>
-
-            {/* Divider */}
-            <div className="w-px h-6 bg-border" />
-
-            <div className="relative" ref={exportDropdownRef}>
-                <button
-                    className={clsx(btnBase, btnDefault, isExportExpanded && "bg-gray-700", !imageFile && btnDisabled)}
-                    onClick={() => setIsExportExpanded(!isExportExpanded)}
-                    disabled={!imageFile}
-                    title={t('toolbar.export')}
+                {/* Model Selector */}
+                <select
+                    className="input-dark h-8 text-xs max-w-[120px] cursor-pointer"
+                    value={selectedModel || ''}
+                    onChange={(e) => onSelectModel?.(e.target.value)}
                 >
-                    <Download size={16} />
-                    <span className="hidden sm:inline">{t('toolbar.export')}</span>
-                    <ChevronDown size={14} />
+                    <option value="" disabled hidden>Model...</option>
+                    {models?.map(model => (
+                        <option key={model.id} value={model.id}>{model.name}</option>
+                    ))}
+                </select>
+
+                <button
+                    className="btn-ghost w-8 h-8 px-0"
+                    onClick={onOpenModelManager}
+                    title="Manage Models"
+                >
+                    <Settings size={14} />
+                </button>
+            </div>
+
+            {/* Divider */}
+            <div className="w-px h-5 bg-[var(--border-subtle)]" />
+
+            {/* === RIGHT SECTION: Action Buttons === */}
+            <div className="flex items-center gap-2">
+                <div className="toolbar-group">
+                    <button
+                        className={clsx("toolbar-group-item", !canUndo && "opacity-30 pointer-events-none")}
+                        onClick={onUndo}
+                        disabled={!canUndo}
+                        title="Undo (Ctrl+Z)"
+                    >
+                        <Undo2 size={16} />
+                    </button>
+                    <button
+                        className={clsx("toolbar-group-item", !canRedo && "opacity-30 pointer-events-none")}
+                        onClick={onRedo}
+                        disabled={!canRedo}
+                        title="Redo (Ctrl+Y)"
+                    >
+                        <Redo2 size={16} />
+                    </button>
+                </div>
+                <button
+                    className="btn-ghost w-8 h-8 px-0 text-red-400 hover:text-red-300"
+                    onClick={onClearAll}
+                    title="Clear All"
+                >
+                    <Trash2 size={14} />
                 </button>
 
-                {isExportExpanded && (
-                    <div className="absolute top-full right-0 mt-1 bg-tertiary border border-border rounded-lg shadow-xl z-50 min-w-[180px] py-1">
-                        <div className="px-3 py-1.5 text-xs text-txt-dim uppercase tracking-wider border-b border-border">
-                            {t('toolbar.export')}
-                        </div>
-                        {exportFormats.map(f => (
-                            <button
-                                key={`current-${f.id}`}
-                                className="w-full px-3 py-2 text-left text-sm text-txt-dim hover:bg-accent/30 hover:text-white transition-colors"
-                                onClick={() => handleExportCurrentClick(f.id)}
-                            >
-                                {f.label}
-                            </button>
-                        ))}
-                    </div>
-                )}
+                {/* Divider */}
+                <div className="w-px h-5 bg-[var(--border-subtle)]" />
+
+                {/* Glowing Detect Button */}
+                <button
+                    className={clsx("btn-tactile btn-accent", (isProcessing || !imageFile) && "opacity-40 pointer-events-none")}
+                    onClick={onDetectAll}
+                    disabled={isProcessing || !imageFile}
+                    title={textPrompt?.trim() ? 'Segment' : 'Detect'}
+                >
+                    {isProcessing ? (
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                        <Scan size={14} />
+                    )}
+                    <span className="text-xs font-medium">{textPrompt?.trim() ? 'Segment' : 'Detect'}</span>
+                </button>
+
+                {/* Prominent Train Button */}
+                <button
+                    className="btn-tactile btn-success"
+                    onClick={onOpenTrainModal}
+                    title="Train Model"
+                >
+                    <GraduationCap size={14} />
+                    <span className="text-xs font-medium">Train</span>
+                </button>
             </div>
 
-            <button
-                className={clsx(btnBase, btnDefault)}
-                onClick={onOpenTrainModal}
-                title="Train Model"
-            >
-                <GraduationCap size={16} />
-                <span className="hidden sm:inline">Train</span>
-            </button>
-
-            {/* Spacer */}
-            <div className="flex-1" />
-
-            {/* Save Message */}
+            {/* Save Message Toast */}
             {saveMessage && (
                 <div className={clsx(
-                    "fixed top-16 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg shadow-lg text-sm font-medium z-50 animate-pulse",
-                    saveMessage.type === 'success' && "bg-green-600/90 text-white",
+                    "fixed top-14 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg shadow-lg text-xs font-medium z-50",
+                    saveMessage.type === 'success' && "bg-emerald-600/90 text-white",
                     saveMessage.type === 'error' && "bg-red-600/90 text-white",
                     saveMessage.type === 'info' && "bg-indigo-600/90 text-white"
                 )}>

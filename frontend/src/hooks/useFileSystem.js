@@ -843,12 +843,25 @@ function serializeAnnotations(annotations, format, classNames, imgWidth = 0, img
         console.warn('Only YOLO format is currently supported for serialization');
     }
 
-    const lines = annotations.map(ann => {
-        let classId = ann.classId;
-        if (classId === undefined) {
-            classId = classNames.indexOf(ann.label);
-            if (classId === -1) classId = 0;
+    // Fix: Construct a superset of classes (Global + Current File's Locals)
+    // This ensures that if a user adds a new label "foo" that isn't in global classNames yet,
+    // it gets added to this file's metadata and receives a valid ID, instead of defaulting to 0.
+    const usedLabels = new Set(annotations.map(a => a.label).filter(l => l));
+    const effectiveClassNames = [...(classNames || [])];
+
+    usedLabels.forEach(label => {
+        if (!effectiveClassNames.includes(label)) {
+            effectiveClassNames.push(label);
         }
+    });
+
+    const lines = annotations.map(ann => {
+        // ALWAYS derive classId from the label to ensure it matches the text shown in UI.
+        // Relying on ann.classId can be dangerous if the label text was edited but ID wasn't.
+        let classId = effectiveClassNames.indexOf(ann.label);
+
+        // Fallback for completely unknown/empty labels (should default to 0 to keep file valid)
+        if (classId === -1) classId = 0;
 
         if (ann.type === 'box') {
             const x = imgWidth ? (ann.x + ann.w / 2) / imgWidth : ann.x;
@@ -867,8 +880,8 @@ function serializeAnnotations(annotations, format, classNames, imgWidth = 0, img
         return null;
     }).filter(Boolean);
 
-    // Add class metadata
-    lines.push(`# classes: ${classNames.join(', ')}`);
+    // Add class metadata so we can reconstruct names when loading
+    lines.push(`# classes: ${effectiveClassNames.join(', ')}`);
 
     return lines.join('\n');
 }

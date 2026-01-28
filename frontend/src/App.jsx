@@ -229,8 +229,12 @@ function App() {
 
   const handleImageUpload = useCallback((e) => {
     const file = stage.handleImageUpload(e);
-    if (file) annotationsHook.reset();
-  }, [stage, annotationsHook]);
+    if (file) {
+      annotationsHook.reset();
+      // Ingest into file system so it appears in the explorer
+      fileSystem.ingestFiles([file]);
+    }
+  }, [stage, annotationsHook, fileSystem]);
 
   const handleLabelChange = useCallback((newLabel) => {
     annotationsHook.updateLabel(newLabel);
@@ -374,6 +378,25 @@ function App() {
     }
   }, [fileSystem.activeFileData, annotationsHook.annotations, formatConverter]);
 
+  // ============================================
+  // FILE SWITCHING HANDLER (Prevents Data Loss)
+  // ============================================
+  const handleFileSwitch = useCallback((fileId, e) => {
+    // Force immediate save of current annotations before switching context
+    // This prevents the debounce timer in useEffect from being cleared/cancelled without saving
+    if (fileSystem.activeFileId && annotationsHook.annotations) {
+      const options = {};
+      if (stage.imageObj) {
+        options.width = stage.imageObj.naturalWidth;
+        options.height = stage.imageObj.naturalHeight;
+      }
+      // Force save to the CURRENT activeFileId before it changes
+      fileSystem.updateActiveAnnotations(annotationsHook.annotations, options);
+    }
+    // Proceed with the standard click handler which switches the file
+    fileSystem.handleFileClick(fileId, e);
+  }, [fileSystem, annotationsHook.annotations, stage.imageObj]);
+
   const handleDoubleClick = useCallback(() => {
     if (drawTools.tool === 'poly' && drawTools.currentPolyPoints.length >= 3) {
       drawTools.closePolygon();
@@ -478,7 +501,7 @@ function App() {
 
   return (
     <div
-      className="App flex flex-col h-screen w-screen overflow-hidden bg-primary font-sans text-primary"
+      className="App flex flex-col h-screen w-screen overflow-hidden bg-theme-primary font-sans text-theme-primary"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => e.preventDefault()}
     >
@@ -511,13 +534,13 @@ function App() {
       <div className="flex flex-1 overflow-hidden relative h-[calc(100vh-56px)]">
         {isLeftPanelOpen && (
           <>
-            <div className="flex flex-col flex-shrink-0 bg-secondary border-r border-border min-h-0 overflow-hidden" style={{ width: leftPanelWidth }}>
+            <div className="flex flex-col flex-shrink-0 bg-theme-secondary border-r border-theme min-h-0 overflow-hidden" style={{ width: leftPanelWidth }}>
               <FileExplorer
                 files={fileSystem.files}
                 activeFileId={fileSystem.activeFileId}
                 selectedFileIds={fileSystem.selectedFileIds}
                 onSelectFile={fileSystem.selectFile}
-                onFileClick={fileSystem.handleFileClick}
+                onFileClick={handleFileSwitch}
                 onIngestFiles={fileSystem.ingestFiles}
                 onClearAll={fileSystem.clearProject}
                 onRetryFile={fileSystem.retryFile}
@@ -535,7 +558,8 @@ function App() {
         )}
 
         <div
-          className="flex-1 min-w-0 relative bg-primary overflow-hidden"
+          className="flex-1 min-w-0 relative bg-theme-secondary overflow-hidden"
+          style={{ backgroundImage: 'radial-gradient(var(--text-secondary) 1px, transparent 1px)', backgroundSize: '20px 20px' }}
           ref={canvasContainerRef}
           onContextMenu={(e) => e.preventDefault()}
         >
@@ -562,7 +586,7 @@ function App() {
         {isRightPanelOpen && (
           <>
             <div className="panel-resizer right" onMouseDown={() => setIsResizingRight(true)} />
-            <div className="flex flex-col flex-shrink-0 bg-secondary border-l border-border min-h-0 overflow-hidden" style={{ width: rightPanelWidth }}>
+            <div className="flex flex-col flex-shrink-0 bg-theme-secondary border-l border-theme min-h-0 overflow-hidden" style={{ width: rightPanelWidth }}>
               <RightSidebar
                 selectedAnn={annotationsHook.selectedAnn} selectedLabel={annotationsHook.selectedLabel}
                 onLabelChange={handleLabelChange} onDelete={annotationsHook.deleteSelected}
@@ -575,6 +599,7 @@ function App() {
                 filterText={drawTools.filterText} setFilterText={drawTools.setFilterText}
                 onSelectLabel={(l) => drawTools.setFilterText(l)}
                 onRenameLabel={(o, n) => fileSystem.renameClassActiveOnly(o, n)}
+                files={fileSystem.files}
               />
             </div>
           </>

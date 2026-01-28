@@ -1,53 +1,33 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-/* Map CSS variables to Tailwind semantic colors */
-@theme {
-  /* Background colors */
-  --color-primary: var(--bg-primary);
-  --color-secondary: var(--bg-secondary);
-  --color-tertiary: var(--bg-tertiary);
+/* 
+ * Theme System - Professional AI Image Labeling SaaS
+ * Figma-inspired minimalist interface with Deep Dark Mode
+ * Color Palette: Slate-950 + Charcoal with Neon Indigo/Emerald accents
+ */
 
-  /* Text colors */
-  --color-txt-main: var(--text-primary);
-  --color-txt-dim: var(--text-secondary);
-
-  /* Accent and border */
-  --color-accent: var(--accent-color);
-  --color-border: var(--border-color);
-}
-
-/* Default Theme: Dark */
+/* Default Theme: Deep Dark (Slate-950) */
 :root,
 .theme-dark {
-  --bg-primary: #0f1117;
-  --bg-secondary: #161922;
-  --bg-tertiary: #1f2937;
-  --text-primary: #f3f4f6;
-  --text-secondary: #9ca3af;
-  --accent-color: #6366f1;
-  --border-color: #374151;
-}
-
-/* Theme: Light (Clean) */
-.theme-light {
-  --bg-primary: #f8fafc;
-  --bg-secondary: #ffffff;
-  --bg-tertiary: #f1f5f9;
-  --text-primary: #1e293b;
-  --text-secondary: #64748b;
-  --accent-color: #4f46e5;
-  --border-color: #e2e8f0;
-}
-
-/* Theme: Midnight (Blue) */
-.theme-midnight {
-  --bg-primary: #0b1120;
-  --bg-secondary: #1e293b;
-  --bg-tertiary: #334155;
-  --text-primary: #e2e8f0;
+  --bg-primary: #020617;
+  --bg-secondary: #0f172a;
+  --bg-tertiary: #1e293b;
+  --bg-elevated: #334155;
+  --bg-panel: #0c1220;
+  --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
-  --accent-color: #3b82f6;
-  --border-color: #475569;
+  --text-muted: #64748b;
+  --accent-color: #6366f1;
+  --accent-secondary: #10b981;
+  --accent-indigo: #6366f1;
+  --accent-emerald: #10b981;
+  --border-color: rgba(148, 163, 184, 0.1);
+  --border-subtle: rgba(148, 163, 184, 0.05);
+  --glow-indigo: rgba(99, 102, 241, 0.5);
+  --glow-emerald: rgba(16, 185, 129, 0.4);
+  --shadow-soft: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --radius-base: 8px;
 }
 
 /* Base styles */
@@ -65,25 +45,66 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom scrollbar for dark theme */
+/* ========================================
+ * UTILITY CLASSES FOR DYNAMIC THEMING
+ * ======================================== */
+
+/* Backgrounds */
+.bg-theme-primary {
+  background-color: var(--bg-primary);
+}
+
+.bg-theme-secondary {
+  background-color: var(--bg-secondary);
+}
+
+.bg-theme-tertiary {
+  background-color: var(--bg-tertiary);
+}
+
+.bg-theme-panel {
+  background-color: var(--bg-panel);
+}
+
+/* Text Colors */
+.text-theme-primary {
+  color: var(--text-primary);
+}
+
+.text-theme-secondary {
+  color: var(--text-secondary);
+}
+
+.text-theme-accent {
+  color: var(--accent-color);
+}
+
+/* Borders - Subtle tonal shifts */
+.border-theme {
+  border-color: var(--border-color);
+}
+
+.border-subtle {
+  border-color: var(--border-subtle);
+}
+
 /* Custom scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: var(--bg-tertiary);
-  border-radius: 4px;
+  background: transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: var(--border-color);
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: var(--text-secondary);
+  background: var(--text-muted);
 }
 
 /* Focus visible styles */
@@ -96,4 +117,233 @@ body {
 ::selection {
   background-color: var(--accent-color);
   color: white;
+}
+
+/* ========================================
+ * FIGMA-INSPIRED COMPONENT STYLES
+ * 8px border-radius, soft inner shadows
+ * ======================================== */
+
+/* Base Card Style */
+.card-figma {
+  background-color: var(--bg-secondary);
+  border-radius: var(--radius-base);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-soft), 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+}
+
+/* Ghost Button (Import style) */
+.btn-ghost {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: var(--radius-base);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  height: 2rem;
+  border: 1px solid transparent;
+  background-color: transparent;
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+}
+
+.btn-ghost:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* Tactile Button Base */
+.btn-tactile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: var(--radius-base);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  height: 2rem;
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  transition: all 0.15s ease;
+  box-shadow: var(--shadow-soft);
+}
+
+.btn-tactile:hover {
+  background-color: var(--bg-elevated);
+  border-color: var(--border-color);
+}
+
+.btn-tactile:active {
+  transform: scale(0.98);
+}
+
+.btn-tactile:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Glowing Indigo Button (Detect) */
+.btn-accent {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: white;
+  border: none;
+  box-shadow: 0 0 20px -4px var(--glow-indigo), var(--shadow-soft);
+}
+
+.btn-accent:hover {
+  background: linear-gradient(135deg, #818cf8 0%, #6366f1 100%);
+  box-shadow: 0 0 28px -4px var(--glow-indigo);
+  transform: translateY(-1px);
+}
+
+/* Prominent Emerald Button (Train Model) */
+.btn-success {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: white;
+  border: none;
+  border-radius: 9999px;
+  padding: 0.5rem 1.25rem;
+  box-shadow: 0 0 20px -4px var(--glow-emerald), var(--shadow-soft);
+}
+
+.btn-success:hover {
+  background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+  box-shadow: 0 0 28px -4px var(--glow-emerald);
+  transform: translateY(-1px);
+}
+
+/* Danger Button */
+.btn-danger {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  border-color: transparent;
+}
+
+.btn-danger:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+}
+
+/* ========================================
+ * EXPLORER PANEL STYLES
+ * ======================================== */
+
+/* Active file with Indigo glow and accent bar */
+.file-item-active {
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.15) 0%, rgba(99, 102, 241, 0.05) 100%);
+  border-left: 4px solid var(--accent-indigo);
+  box-shadow: 0 0 16px -4px var(--glow-indigo);
+}
+
+/* Thumbnail 16:9 container */
+.thumbnail-16-9 {
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-base);
+  overflow: hidden;
+  background: var(--bg-tertiary);
+}
+
+/* ========================================
+ * INPUT STYLES
+ * ======================================== */
+
+/* Sleek dark input with icon support */
+.input-dark {
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-base);
+  color: var(--text-primary);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  transition: all 0.15s ease;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.input-dark:focus {
+  outline: none;
+  border-color: var(--accent-indigo);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1), inset 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.input-dark::placeholder {
+  color: var(--text-muted);
+}
+
+/* Input with left icon */
+.input-with-icon {
+  padding-left: 2.25rem;
+}
+
+/* ========================================
+ * TOOLBAR STYLES
+ * ======================================== */
+
+/* Annotation Toolkit Group */
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-base);
+  padding: 0.25rem;
+  gap: 0.125rem;
+  border: 1px solid var(--border-subtle);
+}
+
+.toolbar-group-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 6px;
+  color: var(--text-muted);
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+
+.toolbar-group-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.toolbar-group-item.active {
+  color: var(--accent-indigo);
+  background: rgba(99, 102, 241, 0.15);
+}
+
+/* Slim Toolbar */
+.toolbar-slim {
+  height: 3rem;
+  padding: 0 1rem;
+}
+
+/* ========================================
+ * GLOW & ANIMATION EFFECTS
+ * ======================================== */
+
+.glow-indigo {
+  box-shadow: 0 0 50px -12px var(--glow-indigo);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 40px -12px var(--glow-emerald);
+}
+
+/* Subtle hover animation */
+.hover-lift {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Panel separator - tonal shift */
+.panel-separator {
+  background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
 }
