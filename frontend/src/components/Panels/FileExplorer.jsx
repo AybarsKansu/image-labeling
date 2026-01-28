@@ -482,36 +482,6 @@ const FileExplorer = ({
                     />
                 )}
             </div>
-
-            {/* Footer Actions */}
-            <div className="flex gap-2 p-4 border-t border-border bg-secondary">
-                <button
-                    className={clsx(
-                        "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                        files.length === 0
-                            ? "bg-tertiary text-txt-dim/50 cursor-not-allowed"
-                            : "bg-tertiary text-primary hover:bg-tertiary/80 border border-border"
-                    )}
-                    onClick={onExportProject}
-                    disabled={files.length === 0}
-                >
-                    <Download className="w-4 h-4" />
-                    Export
-                </button>
-                <button
-                    className={clsx(
-                        "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                        files.length === 0
-                            ? "bg-accent/50 text-white/50 cursor-not-allowed"
-                            : "bg-accent text-white hover:bg-accent/90 shadow-sm"
-                    )}
-                    onClick={() => onSaveAll && onSaveAll()}
-                    disabled={files.length === 0}
-                >
-                    <Save className="w-4 h-4" />
-                    Save
-                </button>
-            </div>
         </div>
     );
 };

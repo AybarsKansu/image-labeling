@@ -107,10 +107,13 @@ const MainToolbar = ({
     };
 
     return (
-        <div className="flex items-center gap-2 px-4 h-12 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)]">
+        <div
+            className="flex items-center gap-2 pr-4 h-12 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)]"
+            style={{ paddingLeft: '40px' }}
+        >
 
-            {/* === LEFT SECTION: Ghost Import Buttons === */}
-            <div className="flex items-center gap-1">
+            {/* === LEFT SECTION: Hidden Controls === */}
+            <div className="flex-1 flex items-center gap-1">
                 {/* Hidden file input */}
                 <input
                     ref={annotationInputRef}
@@ -125,56 +128,23 @@ const MainToolbar = ({
                     style={{ display: 'none' }}
                 />
 
-                {/* Import Dropdown */}
-                <div className="relative" ref={importDropdownRef}>
+                <div className="toolbar-group ml-8">
                     <button
-                        className={clsx("btn-ghost", !imageFile && "opacity-40 pointer-events-none")}
-                        onClick={() => setIsImportExpanded(!isImportExpanded)}
-                        disabled={!imageFile}
+                        className={clsx("toolbar-group-item", !canUndo && "opacity-30 pointer-events-none")}
+                        onClick={onUndo}
+                        disabled={!canUndo}
+                        title="Undo (Ctrl+Z)"
                     >
-                        <Upload size={14} />
-                        <span>Import</span>
+                        <Undo2 size={16} />
                     </button>
-
-                    {isImportExpanded && (
-                        <div className="absolute top-full left-0 mt-1 bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-lg shadow-xl z-50 min-w-[140px] py-1">
-                            {loadFormats.map(f => (
-                                <button
-                                    key={f.id}
-                                    className="w-full px-3 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--accent-color)] hover:text-white transition-colors"
-                                    onClick={() => handleImportClick(f.id)}
-                                >
-                                    {f.label}
-                                </button>
-                            ))}
-                        </div>
-                    )}
-                </div>
-
-                {/* Export Dropdown */}
-                <div className="relative" ref={exportDropdownRef}>
                     <button
-                        className={clsx("btn-ghost", !imageFile && "opacity-40 pointer-events-none")}
-                        onClick={() => setIsExportExpanded(!isExportExpanded)}
-                        disabled={!imageFile}
+                        className={clsx("toolbar-group-item", !canRedo && "opacity-30 pointer-events-none")}
+                        onClick={onRedo}
+                        disabled={!canRedo}
+                        title="Redo (Ctrl+Y)"
                     >
-                        <Download size={14} />
-                        <span>Export</span>
+                        <Redo2 size={16} />
                     </button>
-
-                    {isExportExpanded && (
-                        <div className="absolute top-full left-0 mt-1 bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] rounded-lg shadow-xl z-50 min-w-[140px] py-1">
-                            {exportFormats.map(f => (
-                                <button
-                                    key={f.id}
-                                    className="w-full px-3 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--accent-color)] hover:text-white transition-colors"
-                                    onClick={() => handleExportCurrentClick(f.id)}
-                                >
-                                    {f.label}
-                                </button>
-                            ))}
-                        </div>
-                    )}
                 </div>
             </div>
 
@@ -182,7 +152,7 @@ const MainToolbar = ({
             <div className="w-px h-5 bg-[var(--border-subtle)]" />
 
             {/* === CENTER SECTION: Annotation Toolkit === */}
-            <div className="flex items-center gap-2 flex-1 justify-center">
+            <div className="flex-initial flex items-center gap-2 justify-center">
                 {/* Core Tools Group */}
                 <div className="toolbar-group">
                     {coreTools.map(t => {
@@ -283,25 +253,7 @@ const MainToolbar = ({
             <div className="w-px h-5 bg-[var(--border-subtle)]" />
 
             {/* === RIGHT SECTION: Action Buttons === */}
-            <div className="flex items-center gap-2">
-                <div className="toolbar-group">
-                    <button
-                        className={clsx("toolbar-group-item", !canUndo && "opacity-30 pointer-events-none")}
-                        onClick={onUndo}
-                        disabled={!canUndo}
-                        title="Undo (Ctrl+Z)"
-                    >
-                        <Undo2 size={16} />
-                    </button>
-                    <button
-                        className={clsx("toolbar-group-item", !canRedo && "opacity-30 pointer-events-none")}
-                        onClick={onRedo}
-                        disabled={!canRedo}
-                        title="Redo (Ctrl+Y)"
-                    >
-                        <Redo2 size={16} />
-                    </button>
-                </div>
+            <div className="flex-1 flex items-center gap-8 justify-end">
                 <button
                     className="btn-ghost w-8 h-8 px-0 text-red-400 hover:text-red-300"
                     onClick={onClearAll}

@@ -73,10 +73,10 @@ const Dashboard = () => {
             {/* Centered Hero Section */}
             <div className="relative z-10 flex flex-col items-center justify-center min-h-[45vh] px-8 text-center">
                 <h1 className="text-5xl md:text-6xl font-bold text-white mb-4 tracking-tight">
-                    Veri Etiketlemenin Geleceği
+                    Image Labeling
                 </h1>
                 <p className="text-lg md:text-xl text-gray-400 max-w-2xl mb-10">
-                    Hızlı, akıllı ve kesintisiz görüntü/video etiketleme platformu
+                    A fast, intelligent, and continuous image/video tagging platform.
                 </p>
 
                 {/* Glassmorphism Action Buttons */}
@@ -86,7 +86,15 @@ const Dashboard = () => {
                         className="btn-glass primary"
                     >
                         <Plus size={18} />
-                        <span>Yeni Proje</span>
+                        <span>New Project</span>
+                    </button>
+
+                    <button
+                        onClick={() => navigate('/models')}
+                        className="btn-glass"
+                    >
+                        <Cpu size={18} />
+                        <span>Models</span>
                     </button>
 
                     <button
@@ -95,21 +103,13 @@ const Dashboard = () => {
                         title="Yakında"
                     >
                         <Play size={18} />
-                        <span>Video Studio</span>
-                    </button>
-
-                    <button
-                        onClick={() => navigate('/models')}
-                        className="btn-glass"
-                    >
-                        <Cpu size={18} />
-                        <span>Modeller</span>
+                        <span>Documentation</span>
                     </button>
                 </div>
             </div>
 
             {/* Recent Projects - Spotify Style List */}
-            <div className="relative z-10 flex-1 px-8 pb-8 overflow-y-auto">
+            <div className="relative z-10 flex-1 px-8 pb-8 mt-12 overflow-y-auto">
                 <h2 className="text-sm uppercase tracking-wider text-gray-500 font-semibold mb-4 flex items-center gap-2">
                     <Clock size={14} />
                     Son Projeler
@@ -126,7 +126,7 @@ const Dashboard = () => {
                                 key={project.id}
                                 onClick={() => handleOpenProject(project.id)}
                                 className={`
-                                    flex items-center gap-4 px-5 py-3.5 cursor-pointer list-item-hover
+                                    flex items-center gap-4 px-5 py-3.5 cursor-pointer list-item-hover group
                                     ${index !== 0 ? 'border-t border-theme' : ''}
                                 `}
                             >

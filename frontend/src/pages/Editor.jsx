@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import clsx from 'clsx';
 import axios from 'axios';
 import * as turf from '@turf/turf';
-import { ArrowLeft, Upload, Download, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Upload, Download, ChevronDown, MoreVertical, Save, Trash2, Archive, FileJson } from 'lucide-react';
 import '../App.css';
 
 // Custom Hooks
@@ -26,10 +27,10 @@ import { ExportModal } from '../components/Modals';
 import FloatingTrigger from '../components/Common/FloatingTrigger';
 import VideoWorkspace from '../components/Workspaces/VideoWorkspace';
 
-// Config & DB
 import { generateId } from '../utils/helpers';
 import { AnnotationConverter } from '../utils/annotationConverter';
-import { getProject } from '../db/projectOperations';
+import { getProject, deleteProject, updateProject } from '../db/projectOperations';
+import { exportProjectAsZip } from '../utils/projectExport';
 
 function Editor() {
     const navigate = useNavigate();
@@ -51,15 +52,42 @@ function Editor() {
 
     // Project name state
     const [projectName, setProjectName] = useState('');
+    const [isEditingProjectName, setIsEditingProjectName] = useState(false);
+    const [tempProjectName, setTempProjectName] = useState('');
+    const [isProjectMenuOpen, setIsProjectMenuOpen] = useState(false);
+    const [isZipExporting, setIsZipExporting] = useState(false);
+    const projectMenuRef = useRef(null);
 
     // Fetch project name on mount
     useEffect(() => {
         if (projectId) {
             getProject(projectId).then(project => {
-                if (project) setProjectName(project.name);
+                if (project) {
+                    setProjectName(project.name);
+                    setTempProjectName(project.name);
+                }
             });
         }
     }, [projectId]);
+
+    const handleRenameProject = async () => {
+        if (!tempProjectName.trim() || tempProjectName === projectName) {
+            setIsEditingProjectName(false);
+            setTempProjectName(projectName);
+            return;
+        }
+
+        try {
+            const { updateProject } = await import('../db/projectOperations');
+            await updateProject(projectId, { name: tempProjectName.trim() });
+            setProjectName(tempProjectName.trim());
+            setIsEditingProjectName(false);
+        } catch (err) {
+            console.error("Rename failed", err);
+            setTempProjectName(projectName);
+            setIsEditingProjectName(false);
+        }
+    };
 
     // ============================================
     // BRIDGE: File System to Canvas
@@ -76,6 +104,43 @@ function Editor() {
             localStorage.setItem('lastActiveProjectId', projectId);
         }
     }, [projectId]);
+
+    // Close project menu on click outside
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (projectMenuRef.current && !projectMenuRef.current.contains(e.target)) {
+                setIsProjectMenuOpen(false);
+            }
+        };
+        if (isProjectMenuOpen) document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, [isProjectMenuOpen]);
+
+    const handleExportZIP = async () => {
+        if (isZipExporting) return;
+        try {
+            setIsZipExporting(true);
+            setIsProjectMenuOpen(false);
+            await exportProjectAsZip(projectId, projectName.replace(/\s+/g, '_'));
+            setSaveMessage({ type: 'success', text: 'Project exported as ZIP!' });
+        } catch (err) {
+            setSaveMessage({ type: 'error', text: 'ZIP Export failed: ' + err.message });
+        } finally {
+            setIsZipExporting(false);
+            setTimeout(() => setSaveMessage(null), 3000);
+        }
+    };
+
+    const handleDeleteThisProject = async () => {
+        if (window.confirm("Bu projeyi ve tüm dosyalarını silmek istediğinizden emin misiniz?")) {
+            try {
+                await deleteProject(projectId);
+                navigate('/');
+            } catch (err) {
+                alert("Silme işlemi başarısız: " + err.message);
+            }
+        }
+    };
 
     useEffect(() => {
         if (activeFileData) {
@@ -461,14 +526,86 @@ function Editor() {
             <FloatingTrigger side="right" isOpen={isRightPanelOpen} onClick={toggleRightPanel} />
 
             {/* Project Header - Back Navigation */}
-            <div className="flex items-center gap-3 h-10 px-4 bg-theme-secondary border-b border-theme flex-shrink-0">
-                <button
-                    onClick={() => navigate('/')}
-                    className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
-                >
-                    <ArrowLeft size={18} />
-                    <span className="font-medium text-sm">{projectName || 'Proje'}</span>
-                </button>
+            <div className="flex items-center justify-between h-10 px-4 bg-theme-secondary border-b border-theme flex-shrink-0">
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => navigate('/')}
+                        className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+                    >
+                        <ArrowLeft size={18} />
+                    </button>
+
+                    {isEditingProjectName ? (
+                        <input
+                            autoFocus
+                            className="bg-theme-tertiary border border-theme-accent rounded px-2 py-0.5 text-sm text-white focus:outline-none"
+                            value={tempProjectName}
+                            onChange={(e) => setTempProjectName(e.target.value)}
+                            onBlur={handleRenameProject}
+                            onKeyDown={(e) => e.key === 'Enter' && handleRenameProject()}
+                        />
+                    ) : (
+                        <span
+                            className="font-medium text-sm text-white cursor-pointer hover:bg-white/5 px-2 py-0.5 rounded transition-colors"
+                            onClick={() => setIsEditingProjectName(true)}
+                            title="İsmi değiştirmek için tıkla"
+                        >
+                            {projectName || 'Proje'}
+                        </span>
+                    )}
+                </div>
+
+
+                {/* Project Actions Menu */}
+                <div className="relative ml-auto" ref={projectMenuRef}>
+                    <button
+                        onClick={() => setIsProjectMenuOpen(!isProjectMenuOpen)}
+                        className={clsx(
+                            "p-1.5 rounded-lg transition-colors",
+                            isProjectMenuOpen ? "bg-theme-tertiary text-white" : "text-gray-400 hover:text-white hover:bg-white/5"
+                        )}
+                    >
+                        <MoreVertical size={16} />
+                    </button>
+
+                    {isProjectMenuOpen && (
+                        <div className="absolute top-full right-0 mt-1 w-48 bg-theme-secondary border border-theme rounded-xl shadow-2xl z-[100] py-2 overflow-hidden backdrop-blur-md">
+                            <button
+                                onClick={() => { handleSaveAll(); setIsProjectMenuOpen(false); }}
+                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-theme-accent/20 hover:text-white transition-colors"
+                            >
+                                <Save size={14} className="text-emerald-400" />
+                                <span>Save Project</span>
+                            </button>
+                            <button
+                                onClick={() => { setShowExportModal(true); setIsProjectMenuOpen(false); }}
+                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-theme-accent/20 hover:text-white transition-colors"
+                            >
+                                <FileJson size={14} className="text-blue-400" />
+                                <span>Export Labels</span>
+                            </button>
+                            <div className="h-px bg-theme-tertiary my-1" />
+                            <button
+                                onClick={handleExportZIP}
+                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-theme-accent/20 hover:text-white transition-colors"
+                            >
+                                {isZipExporting ? (
+                                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                ) : (
+                                    <Archive size={14} className="text-orange-400" />
+                                )}
+                                <span>Download as ZIP</span>
+                            </button>
+                            <button
+                                onClick={() => { handleDeleteThisProject(); setIsProjectMenuOpen(false); }}
+                                className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+                            >
+                                <Trash2 size={14} />
+                                <span>Delete Project</span>
+                            </button>
+                        </div>
+                    )}
+                </div>
             </div>
 
             <MainToolbar
@@ -536,7 +673,7 @@ function Editor() {
                                     title="Label dosyası içe aktar"
                                 >
                                     <Upload size={12} />
-                                    <span className="hidden sm:inline ml-1">İçe Aktar</span>
+                                    <span className="hidden sm:inline ml-1">Import Label</span>
                                 </button>
                                 <button
                                     onClick={() => handleExportCurrent('toon')}
@@ -544,7 +681,7 @@ function Editor() {
                                     title="Label dosyası dışa aktar"
                                 >
                                     <Download size={12} />
-                                    <span className="hidden sm:inline ml-1">Dışa Aktar</span>
+                                    <span className="hidden sm:inline ml-1">Export Label</span>
                                 </button>
                             </div>
                         </div>
