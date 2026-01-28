@@ -128,6 +128,7 @@
     "react-konva": "^19.2.1",
     "react-reconciler": "^0.33.0",
     "react-refresh": "^0.18.0",
+    "react-router-dom": "^7.13.0",
     "react-virtuoso": "^4.18.1",
     "recharts": "^3.7.0",
     "resolve-from": "^4.0.0",

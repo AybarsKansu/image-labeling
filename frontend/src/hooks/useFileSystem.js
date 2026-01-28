@@ -87,25 +87,43 @@ export function useFileSystem() {
             const totalToProcess = images.length + labels.length;
             let processedItems = 0;
 
-            // 1. Process Images
-            for (const img of images) {
-                // Check if a record with this base name already exists (could be a placeholder from a previous label upload)
-                const existing = await db.files.where('baseName').equals(img.baseName).first();
+            // ---------------------------------------------------------
+            // ADIM 1: Görüntüleri İşle (Toplu Okuma Stratejisi)
+            // ---------------------------------------------------------
+
+            // Önce tüm gelen resimlerin baseName'lerini çıkar
+            const incomingImageBaseNames = images.map(img => img.baseName);
+
+            // Veritabanına TEK SEFERDE sor: "Bu isimlerden hangileri bende var?"
+            // (Dexie'nin anyOf operatörü bu işi yapar)
+            const existingRecordsArray = await db.files
+                .where('baseName')
+                .anyOf(incomingImageBaseNames)
+                .toArray();
+
+            // Hızlı erişim için array'i Map'e çevir (Lookup Table)
+            // Key: baseName, Value: Record
+            const existingMap = new Map(existingRecordsArray.map(rec => [rec.baseName, rec]));
+
+            const imageUpdates = images.map(img => {
+                const existing = existingMap.get(img.baseName); // Artık await yok, anlık erişim!
 
                 if (existing) {
-                    // Update existing record with image data
-                    await db.files.update(existing.id, {
+                    // Merge Logic
+                    return {
+                        ...existing,
                         name: img.name,
                         path: img.path || '',
                         blob: img.blob,
                         thumbnail: img.thumbnail,
                         width: img.width,
                         height: img.height,
+                        // Eğer label verisi zaten varsa PENDING, yoksa MISSING_LABEL
                         status: existing.label_data ? FileStatus.PENDING : FileStatus.MISSING_LABEL
-                    });
+                    };
                 } else {
-                    // Create new record
-                    await db.files.add({
+                    // Create Logic
+                    return {
                         name: img.name,
                         baseName: img.baseName,
                         path: img.path || '',
@@ -117,27 +135,46 @@ export function useFileSystem() {
                         label_data: null,
                         status: FileStatus.MISSING_LABEL,
                         created_at: new Date().toISOString()
-                    });
+                    };
                 }
-                processedItems++;
+            });
+
+            // Toplu Yazma (Bu zaten doğruydu)
+            if (imageUpdates.length > 0) {
+                await db.files.bulkPut(imageUpdates);
+                processedItems += images.length;
                 setProcessingProgress({ processed: processedItems, total: totalToProcess, phase: 'saving' });
             }
 
-            // 2. Process Labels
+            // ---------------------------------------------------------
+            // ADIM 2: Etiketleri İşle (Yine Toplu Okuma)
+            // ---------------------------------------------------------
+
+            const incomingLabelBaseNames = labels.map(l => l.baseName);
+
+            // Veritabanından etiketlenecek dosyaları TEK SEFERDE çek
+            // Dikkat: Az önce imageUpdates ile DB'yi güncelledik, taze veri çekmeliyiz.
+            const freshRecordsArray = await db.files
+                .where('baseName')
+                .anyOf(incomingLabelBaseNames)
+                .toArray();
+
+            const freshMap = new Map(freshRecordsArray.map(rec => [rec.baseName, rec]));
+            const labelUpdates = [];
+
             for (const label of labels) {
-                const existing = await db.files.where('baseName').equals(label.baseName).first();
+                const existing = freshMap.get(label.baseName);
 
                 if (existing) {
-                    // Update existing record with label data
-                    // If we have image dimensions now, we should preserve them
-                    await db.files.update(existing.id, {
+                    labelUpdates.push({
+                        ...existing,
                         label_data: label.data,
                         path: existing.path || label.path || '',
                         status: existing.blob ? FileStatus.PENDING : FileStatus.MISSING_IMAGE
                     });
                 } else {
-                    // Create placeholder record
-                    await db.files.add({
+                    // Placeholder (Resmi olmayan etiket)
+                    labelUpdates.push({
                         name: `(Missing Image) ${label.baseName}`,
                         baseName: label.baseName,
                         path: label.path || '',
@@ -151,17 +188,13 @@ export function useFileSystem() {
                         created_at: new Date().toISOString()
                     });
                 }
-                processedItems++;
-                setProcessingProgress({ processed: processedItems, total: totalToProcess, phase: 'saving' });
             }
 
-            /* Keeping global classNames state unchanged as per request to focus on individual annotations */
-            /* 
-            if (result.classNames.length > 0 && result.isGlobalClasses) {
-                setClassNames(result.classNames);
-                await saveSetting('classNames', result.classNames);
+            if (labelUpdates.length > 0) {
+                await db.files.bulkPut(labelUpdates);
+                processedItems += labels.length;
+                setProcessingProgress({ processed: processedItems, total: totalToProcess, phase: 'saving' });
             }
-            */
 
             setIsProcessing(false);
             setProcessingProgress({ processed: 0, total: 0 });

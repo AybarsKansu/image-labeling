@@ -66,38 +66,69 @@ async function processFiles(files) {
         }
     }
 
-    // Process images: generate thumbnails
+    // Process images with Adaptive Batching
     const processedImages = [];
-    for (let i = 0; i < images.length; i++) {
-        const img = images[i];
-        let thumbnail = null;
-        let width = 0;
-        let height = 0;
-        try {
-            const imageBitmap = await createImageBitmap(img.file);
-            width = imageBitmap.width;
-            height = imageBitmap.height;
-            thumbnail = await generateThumbnailFromBitmap(imageBitmap, 100);
-            imageBitmap.close();
-        } catch (err) {
-            console.warn(`Failed to process image ${img.file.name}:`, err);
-        }
 
-        processedImages.push({
-            name: img.file.name,
-            baseName: img.baseName,
-            path: getPath(img.file),
-            type: 'image',
-            blob: img.file,
-            thumbnail: thumbnail,
-            width,
-            height
-        });
+    // Initial batch size heuristic: 5 * logical cores (or 10 if unknown)
+    const initialBatch = (navigator.hardwareConcurrency || 2) * 5;
+    let batchSize = Math.max(10, Math.min(initialBatch, 50)); // Clamp between 10 and 50
+    const TARGET_TIME_MS = 300; // Aim for ~300ms per batch
 
+    let processedCount = 0;
+    while (processedCount < images.length) {
+        const startTime = performance.now();
+
+        const chunk = images.slice(processedCount, processedCount + batchSize);
+
+        // Process this chunk in parallel
+        const results = await Promise.all(chunk.map(async (img) => {
+            let thumbnail = null;
+            let width = 0;
+            let height = 0;
+            try {
+                const imageBitmap = await createImageBitmap(img.file);
+                width = imageBitmap.width;
+                height = imageBitmap.height;
+                thumbnail = await generateThumbnailFromBitmap(imageBitmap, 100);
+                imageBitmap.close();
+            } catch (err) {
+                console.warn(`Failed to process image ${img.file.name}:`, err);
+            }
+
+            return {
+                name: img.file.name,
+                baseName: img.baseName,
+                path: getPath(img.file),
+                type: 'image',
+                blob: img.file,
+                thumbnail: thumbnail,
+                width,
+                height
+            };
+        }));
+
+        processedImages.push(...results);
+        processedCount += chunk.length;
+
+        // Feedback Update
         self.postMessage({
             type: 'PROCESS_PROGRESS',
-            payload: { processed: i + 1, total: images.length + labels.length }
+            payload: { processed: processedCount, total: images.length + labels.length }
         });
+
+        // Adaptive Logic: Adjust batch size for next iteration
+        const duration = performance.now() - startTime;
+
+        if (duration < TARGET_TIME_MS * 0.75) {
+            // Very fast? Increase size (max 50 to avoid memory spikes)
+            batchSize = Math.min(50, Math.ceil(batchSize + 10));
+        } else if (duration > TARGET_TIME_MS * 1.5) {
+            // Too slow? Decrease size (min 5)
+            batchSize = Math.max(5, Math.floor(batchSize - 5));
+        }
+
+        // Optional debugging
+        // console.log(`Batch processed: ${chunk.length} items in ${duration.toFixed(0)}ms. New Batch Size: ${batchSize}`);
     }
 
     // Process labels
