@@ -38,7 +38,9 @@ const MainToolbar = ({
     onExport,
     onExportCurrent,
     isProcessing,
-    saveMessage
+    saveMessage,
+    filterText,
+    onClearFilter
 }) => {
     const { t, i18n } = useTranslation();
     const annotationInputRef = useRef(null);
@@ -238,6 +240,20 @@ const MainToolbar = ({
                             onChange={(e) => setEraserSize(parseInt(e.target.value))}
                             className="w-16 accent-[var(--accent-color)]"
                         />
+                    </div>
+                )}
+
+                {/* Filter Warning */}
+                {filterText && (
+                    <div className="flex items-center gap-1 bg-yellow-500/20 px-2 py-1 rounded text-xs text-yellow-500 border border-yellow-500/30">
+                        <span>Filter: "{filterText}"</span>
+                        <button
+                            onClick={onClearFilter}
+                            className="hover:text-white"
+                            title="Clear Filter"
+                        >
+                            &times;
+                        </button>
                     </div>
                 )}
 

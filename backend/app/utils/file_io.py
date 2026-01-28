@@ -78,3 +78,43 @@ def get_next_version_name(
             pass
     
     return f"{prefix}{max_v + 1}{suffix}"
+
+
+def calculate_partial_hash(file_path: Path, chunk_size: int = 1024 * 1024) -> str:
+    """
+    Calculates a partial SHA-256 hash of a file for efficient deduplication.
+    Reads the first, middle, and last chunks (1MB by default).
+    
+    Args:
+        file_path: Path to the file
+        chunk_size: Size of chunks to read (default 1MB)
+        
+    Returns:
+        Hex digest of the hash
+    """
+    import hashlib
+    import os
+    
+    sha256 = hashlib.sha256()
+    size = os.path.getsize(file_path)
+    
+    with open(file_path, "rb") as f:
+        # 1. First Chunk
+        sha256.update(f.read(chunk_size))
+        
+        # 2. Middle Chunk (if file is large enough)
+        if size > chunk_size * 2:
+            f.seek(size // 2)
+            sha256.update(f.read(chunk_size))
+            
+        # 3. Last Chunk (if file is large enough)
+        if size > chunk_size:
+            # Seek to end - chunk_size. Ensure we don't seek before 0.
+            seek_pos = max(size - chunk_size, 0)
+            f.seek(seek_pos)
+            sha256.update(f.read(chunk_size))
+            
+    # Include file size in the hash to avoid collisions with same content but different lengths (though unlikely with this strat)
+    sha256.update(str(size).encode())
+    
+    return sha256.hexdigest()

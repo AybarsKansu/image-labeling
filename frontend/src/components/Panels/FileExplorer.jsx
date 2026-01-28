@@ -10,6 +10,8 @@ import {
     Clock, Monitor, FileWarning, Save, Eraser
 } from 'lucide-react';
 import { FileStatus } from '../../db/index';
+import { useVideoUpload } from '../../hooks/useVideoUpload';
+import VideoPlayerModal from '../Modals/VideoPlayerModal';
 
 const FileExplorer = ({
     files = [],
@@ -31,7 +33,26 @@ const FileExplorer = ({
     const fileInputRef = useRef(null);
     const folderInputRef = useRef(null);
     const labelInputRef = useRef(null);
+    const videoInputRef = useRef(null);
     const [collapsedFolders, setCollapsedFolders] = useState(new Set());
+
+    // Video Upload Hook
+    const [showVideoModal, setShowVideoModal] = useState(false);
+    const { startUpload, isUploading: isVideoUploading, uploadProgress, videoInfo } = useVideoUpload();
+
+    useEffect(() => {
+        if (videoInfo) {
+            setShowVideoModal(true);
+        }
+    }, [videoInfo]);
+
+    const handleVideoSelect = (e) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            startUpload(file);
+        }
+        e.target.value = '';
+    };
     const { t } = useTranslation();
 
     // Keyboard handler for Delete key
@@ -237,6 +258,7 @@ const FileExplorer = ({
 
             {/* Upload Zones */}
             <div className="grid grid-cols-2 gap-3 p-4">
+                {/* 1. Add Images */}
                 <div
                     className={clsx(
                         "flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed cursor-pointer transition-all",
@@ -254,9 +276,20 @@ const FileExplorer = ({
                     <span className="text-sm font-medium text-[var(--color-txt-dim)]">{t('explorer.addImages')}</span>
                 </div>
 
+                {/* 2. Upload Video */}
+                <div
+                    className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed border-[var(--color-border)] hover:border-purple-500 hover:bg-[var(--color-bg-tertiary)] cursor-pointer transition-all"
+                    onClick={() => videoInputRef.current?.click()}
+                >
+                    <input ref={videoInputRef} type="file" accept="video/*" onChange={handleVideoSelect} style={{ display: 'none' }} />
+                    <Monitor className="w-8 h-8 text-purple-500" />
+                    <span className="text-sm font-medium text-theme-secondary">Upload Video</span>
+                </div>
+
+                {/* 3. Import Labels (Full Width) */}
                 <div
                     className={clsx(
-                        "flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed cursor-pointer transition-all",
+                        "col-span-2 flex flex-col items-center justify-center gap-2 p-4 rounded-lg border-2 border-dashed cursor-pointer transition-all",
                         isLabelDragActive
                             ? "border-green-500 bg-green-500/10"
                             : "border-[var(--color-border)] hover:border-green-500/50 hover:bg-[var(--color-bg-tertiary)]"
@@ -266,10 +299,30 @@ const FileExplorer = ({
                 >
                     <input {...getLabelInputProps()} />
                     <input ref={labelInputRef} type="file" multiple accept=".txt,.xml,.json" onChange={handleLabelSelect} style={{ display: 'none' }} />
-                    <FileText className="w-8 h-8 text-green-400" />
-                    <span className="text-sm font-medium text-theme-secondary">{t('explorer.importLabels')}</span>
+                    <div className="flex items-center gap-2">
+                        <FileText className="w-5 h-5 text-green-400" />
+                        <span className="text-sm font-medium text-theme-secondary">{t('explorer.importLabels')}</span>
+                    </div>
                 </div>
             </div>
+
+            {/* Video Progress */}
+            {isVideoUploading && (
+                <div className="px-4 pb-2">
+                    <div className="bg-theme-tertiary rounded-lg p-3 border border-purple-500/30">
+                        <div className="flex justify-between text-xs text-purple-300 mb-1">
+                            <span>Uploading Video...</span>
+                            <span>{uploadProgress}%</span>
+                        </div>
+                        <div className="h-1.5 bg-[var(--bg-primary)] rounded-full overflow-hidden">
+                            <div
+                                className="h-full bg-purple-500 transition-all duration-300"
+                                style={{ width: `${uploadProgress}%` }}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Processing Indicator */}
             {isProcessing && (
@@ -433,6 +486,11 @@ const FileExplorer = ({
                     {t('common.save')}
                 </button>
             </div>
+            <VideoPlayerModal
+                isOpen={showVideoModal}
+                onClose={() => setShowVideoModal(false)}
+                videoInfo={videoInfo}
+            />
         </div>
     );
 };

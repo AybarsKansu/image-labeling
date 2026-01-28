@@ -528,7 +528,8 @@ function App() {
         eraserSize={drawTools.eraserSize}
         setEraserSize={drawTools.setEraserSize}
         onExportCurrent={handleExportCurrent}
-
+        filterText={drawTools.filterText}
+        onClearFilter={() => drawTools.setFilterText('')}
       />
 
       <div className="flex flex-1 overflow-hidden relative h-[calc(100vh-56px)]">
