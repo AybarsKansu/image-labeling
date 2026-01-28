@@ -347,3 +347,91 @@ body {
 .panel-separator {
   background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
 }
+
+/* ========================================
+ * GLASSMORPHISM STYLES
+ * ======================================== */
+
+/* Glass Button - Frosted glass effect */
+.btn-glass {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.btn-glass:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.btn-glass:active {
+  transform: translateY(0);
+}
+
+.btn-glass.primary {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.btn-glass.primary:hover {
+  background: rgba(99, 102, 241, 0.25);
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 8px 32px rgba(99, 102, 241, 0.2);
+}
+
+.btn-glass:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* List item hover - Spotify style */
+.list-item-hover {
+  transition: all 0.15s ease;
+}
+
+.list-item-hover:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Progress bar */
+.progress-bar {
+  height: 4px;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-indigo) 0%, var(--accent-emerald) 100%);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Panel resizer styles */
+.panel-resizer {
+  width: 4px;
+  cursor: ew-resize;
+  background: transparent;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+
+.panel-resizer:hover {
+  background: var(--accent-color);
+}

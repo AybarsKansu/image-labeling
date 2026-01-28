@@ -5,16 +5,28 @@ import db, { FileStatus } from './index';
  * Projects Operations
  */
 
-// Create a new project
+// Create a new project with optional name (auto-generates if not provided)
 export async function createProject(name) {
     const id = crypto.randomUUID();
-    const now = new Date().toISOString();
+    const now = new Date();
+    const nowISO = now.toISOString();
+
+    // Auto-generate name if not provided
+    if (!name || name.trim() === '') {
+        const months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+            'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+        const day = now.getDate();
+        const month = months[now.getMonth()];
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        name = `Proje - ${day} ${month} ${hours}:${minutes}`;
+    }
 
     await db.projects.add({
         id,
         name,
-        created_at: now,
-        updated_at: now,
+        created_at: nowISO,
+        updated_at: nowISO,
         thumbnail: null,
         file_count: 0
     });

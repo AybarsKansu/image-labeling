@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import * as turf from '@turf/turf';
+import { ArrowLeft, Upload, Download, ChevronDown } from 'lucide-react';
 import '../App.css';
 
 // Custom Hooks
@@ -25,9 +26,10 @@ import { ExportModal } from '../components/Modals';
 import FloatingTrigger from '../components/Common/FloatingTrigger';
 import VideoWorkspace from '../components/Workspaces/VideoWorkspace';
 
-// Config
+// Config & DB
 import { generateId } from '../utils/helpers';
 import { AnnotationConverter } from '../utils/annotationConverter';
+import { getProject } from '../db/projectOperations';
 
 function Editor() {
     const navigate = useNavigate();
@@ -46,6 +48,18 @@ function Editor() {
     const fileSystem = useFileSystem(projectId);
     const { exportProject } = useExport();
     const formatConverter = useFormatConverter();
+
+    // Project name state
+    const [projectName, setProjectName] = useState('');
+
+    // Fetch project name on mount
+    useEffect(() => {
+        if (projectId) {
+            getProject(projectId).then(project => {
+                if (project) setProjectName(project.name);
+            });
+        }
+    }, [projectId]);
 
     // ============================================
     // BRIDGE: File System to Canvas
@@ -446,6 +460,17 @@ function Editor() {
             <FloatingTrigger side="left" isOpen={isLeftPanelOpen} onClick={toggleLeftPanel} />
             <FloatingTrigger side="right" isOpen={isRightPanelOpen} onClick={toggleRightPanel} />
 
+            {/* Project Header - Back Navigation */}
+            <div className="flex items-center gap-3 h-10 px-4 bg-theme-secondary border-b border-theme flex-shrink-0">
+                <button
+                    onClick={() => navigate('/')}
+                    className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
+                >
+                    <ArrowLeft size={18} />
+                    <span className="font-medium text-sm">{projectName || 'Proje'}</span>
+                </button>
+            </div>
+
             <MainToolbar
                 tool={drawTools.tool} setTool={drawTools.setTool}
                 onUndo={annotationsHook.handleUndo} onRedo={annotationsHook.handleRedo}
@@ -458,7 +483,6 @@ function Editor() {
                 models={aiModels.models}
                 selectedModel={aiModels.selectedModel}
                 onSelectModel={aiModels.actions.setModel}
-                // Redirect to Model Hub for management tasks
                 onOpenModelManager={() => navigate('/models')}
                 onOpenTrainModal={() => navigate('/models')}
 
@@ -468,9 +492,10 @@ function Editor() {
                 onExportCurrent={handleExportCurrent}
                 filterText={drawTools.filterText}
                 onClearFilter={() => drawTools.setFilterText('')}
+                onLoadAnnotations={fileSystem.loadAnnotationsToActive}
             />
 
-            <div className="flex flex-1 overflow-hidden relative h-[calc(100vh-56px)]">
+            <div className="flex flex-1 overflow-hidden relative h-[calc(100vh-96px)]">
                 {isLeftPanelOpen && (
                     <>
                         <div className="flex flex-col flex-shrink-0 bg-theme-secondary border-r border-theme min-h-0 overflow-hidden" style={{ width: leftPanelWidth }}>
@@ -496,42 +521,72 @@ function Editor() {
                     </>
                 )}
 
-                <div
-                    className="flex-1 min-w-0 relative bg-theme-secondary overflow-hidden"
-                    style={{ backgroundImage: activeFileData?.type === 'video' ? 'none' : 'radial-gradient(var(--text-secondary) 1px, transparent 1px)', backgroundSize: '20px 20px' }}
-                    ref={canvasContainerRef}
-                    onContextMenu={(e) => e.preventDefault()}
-                >
-                    {!activeFileData ? (
-                        <DragDropZone onImageUpload={handleImageUpload} />
-                    ) : activeFileData.type === 'video' ? (
-                        <VideoWorkspace
-                            videoFile={activeFileData}
-                            onCapture={(file) => {
-                                // Add project ID context to capture
-                                const fileWithProject = new File([file], file.name, { type: file.type });
-                                // We rely on fileSystem to tag it with projectId
-                                fileSystem.ingestFiles([fileWithProject]);
-                            }}
-                        />
-                    ) : (
-                        <CanvasStage
-                            stageRef={stage.stageRef} groupRef={stage.groupRef} stageSize={stage.stageSize}
-                            imageObj={stage.imageObj} imageLayout={stage.imageLayout}
-                            annotations={annotationsHook.annotations} selectedIds={annotationsHook.selectedIds}
-                            filterText={drawTools.filterText} tool={drawTools.tool}
-                            tempAnnotation={drawTools.tempAnnotation} currentPolyPoints={drawTools.currentPolyPoints}
-                            currentPenPoints={drawTools.currentPenPoints} mousePos={drawTools.mousePos}
-                            eraserSize={drawTools.eraserSize} color={drawTools.color}
-                            onWheel={stage.handleWheel} onClick={drawTools.handleStageClick}
-                            onMouseDown={handleMouseDown} onMouseMove={drawTools.handleMouseMove}
-                            onMouseUp={handleMouseUp} onDblClick={handleDoubleClick}
-                            onVertexDrag={drawTools.handleVertexDrag}
-                        />
+                {/* Canvas Area with Header */}
+                <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+                    {/* Canvas Header - File name and Import/Export */}
+                    {activeFileData && activeFileData.type !== 'video' && (
+                        <div className="flex items-center justify-between h-9 px-4 bg-theme-tertiary border-b border-theme flex-shrink-0">
+                            <span className="text-xs text-gray-400 truncate">
+                                {activeFileData.name || 'image.jpg'}
+                            </span>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => document.getElementById('canvas-import-input')?.click()}
+                                    className="btn-ghost text-xs px-2 py-1 h-6"
+                                    title="Label dosyası içe aktar"
+                                >
+                                    <Upload size={12} />
+                                    <span className="hidden sm:inline ml-1">İçe Aktar</span>
+                                </button>
+                                <button
+                                    onClick={() => handleExportCurrent('toon')}
+                                    className="btn-ghost text-xs px-2 py-1 h-6"
+                                    title="Label dosyası dışa aktar"
+                                >
+                                    <Download size={12} />
+                                    <span className="hidden sm:inline ml-1">Dışa Aktar</span>
+                                </button>
+                            </div>
+                        </div>
                     )}
-                    {menuPosition && activeFileData?.type !== 'video' && (
-                        <FloatingSelectionMenu position={menuPosition} selectedCount={annotationsHook.selectedIds.length} onMerge={handleMerge} />
-                    )}
+
+                    <div
+                        className="flex-1 min-h-0 relative bg-theme-secondary overflow-hidden"
+                        style={{ backgroundImage: activeFileData?.type === 'video' ? 'none' : 'radial-gradient(var(--text-secondary) 1px, transparent 1px)', backgroundSize: '20px 20px' }}
+                        ref={canvasContainerRef}
+                        onContextMenu={(e) => e.preventDefault()}
+                    >
+                        {!activeFileData ? (
+                            <DragDropZone onImageUpload={handleImageUpload} />
+                        ) : activeFileData.type === 'video' ? (
+                            <VideoWorkspace
+                                videoFile={activeFileData}
+                                onCapture={(file) => {
+                                    // Add project ID context to capture
+                                    const fileWithProject = new File([file], file.name, { type: file.type });
+                                    // We rely on fileSystem to tag it with projectId
+                                    fileSystem.ingestFiles([fileWithProject]);
+                                }}
+                            />
+                        ) : (
+                            <CanvasStage
+                                stageRef={stage.stageRef} groupRef={stage.groupRef} stageSize={stage.stageSize}
+                                imageObj={stage.imageObj} imageLayout={stage.imageLayout}
+                                annotations={annotationsHook.annotations} selectedIds={annotationsHook.selectedIds}
+                                filterText={drawTools.filterText} tool={drawTools.tool}
+                                tempAnnotation={drawTools.tempAnnotation} currentPolyPoints={drawTools.currentPolyPoints}
+                                currentPenPoints={drawTools.currentPenPoints} mousePos={drawTools.mousePos}
+                                eraserSize={drawTools.eraserSize} color={drawTools.color}
+                                onWheel={stage.handleWheel} onClick={drawTools.handleStageClick}
+                                onMouseDown={handleMouseDown} onMouseMove={drawTools.handleMouseMove}
+                                onMouseUp={handleMouseUp} onDblClick={handleDoubleClick}
+                                onVertexDrag={drawTools.handleVertexDrag}
+                            />
+                        )}
+                        {menuPosition && activeFileData?.type !== 'video' && (
+                            <FloatingSelectionMenu position={menuPosition} selectedCount={annotationsHook.selectedIds.length} onMerge={handleMerge} />
+                        )}
+                    </div>
                 </div>
 
                 {isRightPanelOpen && (
