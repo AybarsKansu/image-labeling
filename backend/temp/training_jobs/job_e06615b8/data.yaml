@@ -1,0 +1,11 @@
+path: /home/aybars_kansu_han/Desktop/example/image-labeling/backend/temp/training_jobs/job_e06615b8
+train: train/images
+val: val/images
+
+names:
+  0: car
+  1: traffic light
+  2: dog
+  3: airplane
+  4: class_0
+  5: class_1

@@ -25,6 +25,7 @@ const FileExplorer = ({
     onSaveAll,
     onExportProject,
     onClearLabels,
+    onSyncWithBackend,
     isProcessing = false,
     processingProgress = { processed: 0, total: 0 }
 }) => {
@@ -392,9 +393,19 @@ const FileExplorer = ({
             {/* Virtual Tree List */}
             <div className="flex-1 min-h-0 overflow-hidden custom-scrollbar">
                 {files.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-full text-[var(--color-txt-dim)]">
-                        <FolderOpen className="w-12 h-12 mb-2 opacity-50" />
-                        <p className="text-sm">Drop files or folders to start</p>
+                    <div className="flex flex-col items-center justify-center h-full text-[var(--color-txt-dim)] px-6 text-center">
+                        <FolderOpen className="w-12 h-12 mb-3 opacity-30" />
+                        <p className="text-sm mb-4">Drop files or folders to start</p>
+
+                        {onSyncWithBackend && (
+                            <button
+                                onClick={onSyncWithBackend}
+                                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 transition-all text-xs font-medium border border-indigo-500/30"
+                            >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                Sync from Backend
+                            </button>
+                        )}
                     </div>
                 ) : (
                     <Virtuoso

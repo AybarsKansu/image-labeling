@@ -7,17 +7,19 @@
 
 import React, { useState } from 'react';
 import clsx from 'clsx';
-import { X, Zap, Cpu, Settings, AlertCircle } from 'lucide-react';
+import { X, Zap, Cpu, Settings, AlertCircle, Folder } from 'lucide-react';
 
 const TrainModelModal = ({
     isOpen,
     onClose,
     models = [],
+    projects = [],
     isTraining,
     onStartTraining,
     onCancelTraining
 }) => {
     const [selectedBaseModel, setSelectedBaseModel] = useState('yolov8n-seg.pt');
+    const [selectedProjectIds, setSelectedProjectIds] = useState([]);
     const [epochs, setEpochs] = useState(100);
     const [batchSize, setBatchSize] = useState(16);
     const [error, setError] = useState(null);
@@ -29,8 +31,13 @@ const TrainModelModal = ({
 
     const handleSubmit = async () => {
         setError(null);
+        if (selectedProjectIds.length === 0) {
+            setError('Please select at least one project');
+            return;
+        }
         const result = await onStartTraining({
             base_model: selectedBaseModel,
+            project_ids: JSON.stringify(selectedProjectIds),
             epochs,
             batch_size: batchSize
         });
@@ -69,6 +76,51 @@ const TrainModelModal = ({
 
                 {/* Content */}
                 <div className="p-6 space-y-6">
+                    {/* Project Selection - Multi-Select */}
+                    <div>
+                        <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
+                            <Folder size={14} className="text-yellow-400" />
+                            Target Projects (Dataset)
+                        </label>
+                        <div className="max-h-48 overflow-y-auto bg-black/30 border border-gray-700 rounded-lg p-2 space-y-1">
+                            {projects.length === 0 ? (
+                                <p className="text-gray-500 text-sm p-2">No projects found</p>
+                            ) : (
+                                projects.map(p => (
+                                    <label
+                                        key={p.id}
+                                        className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 cursor-pointer group"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedProjectIds.includes(p.id)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedProjectIds([...selectedProjectIds, p.id]);
+                                                } else {
+                                                    setSelectedProjectIds(selectedProjectIds.filter(id => id !== p.id));
+                                                }
+                                            }}
+                                            disabled={isTraining}
+                                            className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-purple-500 focus:ring-purple-500"
+                                        />
+                                        <span className="text-white text-sm flex-1">
+                                            {p.name || p.id}
+                                        </span>
+                                        <span className="text-xs text-gray-500">
+                                            {p.file_count || 0} files
+                                        </span>
+                                    </label>
+                                ))
+                            )}
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1.5">
+                            {selectedProjectIds.length === 0
+                                ? "Select at least one project"
+                                : `${selectedProjectIds.length} project(s) selected`}
+                        </p>
+                    </div>
+
                     {/* Base Model Selection */}
                     <div>
                         <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">

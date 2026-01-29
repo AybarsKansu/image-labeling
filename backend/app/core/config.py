@@ -45,6 +45,10 @@ class Settings(BaseSettings):
             self.DATASET_DIR = self.BASE_DIR / "dataset"
 
     @property
+    def STORAGE_DIR(self) -> Path:
+        return self.BASE_DIR / "storage"
+
+    @property
     def images_dir(self) -> Path:
         return self.DATASET_DIR / "images"
     

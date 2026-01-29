@@ -1,5 +1,11 @@
 #!/bin/bash
 
+cleanup() {
+    cd ..
+}
+
+trap cleanup EXIT
+
 cd backend
 if [ -d ".venv" ]; then
     echo "Activating .venv..."
@@ -10,5 +16,3 @@ else
 fi
 
 uvicorn app.main:app --reload --no-access-log --log-level warning
-
-cd ..

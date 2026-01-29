@@ -40,6 +40,24 @@ const ModelHub = () => {
 
     const [activeTab, setActiveTab] = useState('library');
     const [isTrainModalOpen, setIsTrainModalOpen] = useState(false);
+    const [projects, setProjects] = useState([]);
+
+    // Fetch backend projects for training context
+    React.useEffect(() => {
+        const fetchProjects = async () => {
+            const axios = (await import('axios')).default;
+            try {
+                const { API_URL } = await import('../constants/config');
+                const res = await axios.get(`${API_URL}/projects`);
+                if (Array.isArray(res.data)) {
+                    setProjects(res.data);
+                }
+            } catch (e) {
+                console.error("Failed to fetch projects for training:", e);
+            }
+        };
+        fetchProjects();
+    }, []);
 
     const isModelLoading = (id) => loadingModelIds.includes(id);
 
@@ -313,6 +331,7 @@ const ModelHub = () => {
                 isOpen={isTrainModalOpen}
                 onClose={() => setIsTrainModalOpen(false)}
                 models={models}
+                projects={projects}
                 isTraining={isTraining}
                 onStartTraining={handleStartTraining}
                 onCancelTraining={actions.cancelTraining}

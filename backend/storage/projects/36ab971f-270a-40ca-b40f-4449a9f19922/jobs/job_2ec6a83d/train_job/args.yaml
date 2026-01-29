@@ -1,7 +1,7 @@
 task: segment
 mode: train
 model: yolov8n-seg.pt
-data: /home/aybars_kansu_han/Desktop/example/image-labeling/backend/dataset/data.yaml
+data: /home/aybars_kansu_han/Desktop/example/image-labeling/backend/temp/training_jobs/job_2ec6a83d/data.yaml
 epochs: 1
 time: null
 patience: 50
@@ -12,7 +12,7 @@ save_period: -1
 cache: false
 device: '0'
 workers: 8
-project: runs
+project: /home/aybars_kansu_han/Desktop/example/image-labeling/backend/temp/training_jobs/job_2ec6a83d/runs
 name: train_job
 exist_ok: true
 pretrained: true
@@ -105,4 +105,4 @@ auto_augment: randaugment
 erasing: 0.4
 cfg: null
 tracker: botsort.yaml
-save_dir: /home/aybars_kansu_han/Desktop/example/image-labeling/backend/runs/train_job
+save_dir: /home/aybars_kansu_han/Desktop/example/image-labeling/backend/temp/training_jobs/job_2ec6a83d/runs/train_job

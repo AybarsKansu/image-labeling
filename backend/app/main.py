@@ -57,6 +57,11 @@ def create_app() -> FastAPI:
         os.makedirs(uploads_dir)
     app.mount("/static/uploads", StaticFiles(directory=uploads_dir), name="uploads")
     
+    # Mount projects storage
+    storage_projects_dir = settings.STORAGE_DIR / "projects"
+    storage_projects_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/static/projects", StaticFiles(directory=str(storage_projects_dir)), name="projects")
+    
     # Global exception handler
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):

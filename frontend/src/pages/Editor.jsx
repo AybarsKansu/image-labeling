@@ -24,7 +24,7 @@ import FloatingSelectionMenu from '../components/Panels/FloatingSelectionMenu';
 import FileExplorer from '../components/Panels/FileExplorer';
 import RightSidebar from '../components/Panels/RightSidebar';
 import DragDropZone from '../components/Common/DragDropZone';
-import { ExportModal } from '../components/Modals';
+import { ExportModal, AugmentationModal } from '../components/Modals';
 import FloatingTrigger from '../components/Common/FloatingTrigger';
 import VideoWorkspace from '../components/Workspaces/VideoWorkspace';
 
@@ -62,7 +62,7 @@ function Editor() {
     // Modal states for confirm dialogs
     const [deleteProjectModal, setDeleteProjectModal] = useState(false);
     const [saveModal, setSaveModal] = useState({ isOpen: false, step: 'confirm' });
-    const [confirmAugment, setConfirmAugment] = useState(false);
+    const [selectedAugments, setSelectedAugments] = useState([]);
 
     // Fetch project name on mount
     useEffect(() => {
@@ -101,6 +101,7 @@ function Editor() {
     const { activeFileData } = fileSystem;
     const { setImageUrl, setImageFile, closeImage } = stage;
     const { setAnnotations, clearSelection, reset: resetAnns } = annotationsHook;
+    const [isEditorReady, setIsEditorReady] = useState(false);
 
     // ============================================
     // PERSISTENCE: Save last project ID
@@ -151,10 +152,12 @@ function Editor() {
             if (activeFileData.imageUrl) setImageUrl(activeFileData.imageUrl);
             if (activeFileData.blob) setImageFile(activeFileData.blob);
             setAnnotations(activeFileData.annotations || []);
+            setIsEditorReady(true); // MARK AS READY
             clearSelection();
         } else {
             closeImage();
             resetAnns();
+            setIsEditorReady(false); // MARK AS NOT READY
         }
     }, [activeFileData, setImageUrl, setImageFile, closeImage, setAnnotations, clearSelection, resetAnns]);
 
@@ -176,7 +179,7 @@ function Editor() {
             return;
         }
 
-        if (fileSystem.activeFileId) {
+        if (fileSystem.activeFileId && isEditorReady) {
             const timer = setTimeout(() => {
                 const options = {};
                 if (stage.imageObj) {
@@ -192,6 +195,7 @@ function Editor() {
     // Reset initial load flag when file changes
     useEffect(() => {
         isInitialLoad.current = true;
+        setIsEditorReady(false);
     }, [fileSystem.activeFileId]);
 
     const menuPosition = useMemo(() => {
@@ -222,7 +226,7 @@ function Editor() {
     // ACTIONS & EVENT HANDLERS
     // ============================================
 
-    const handleSaveAll = useCallback(async (doAugment = false) => {
+    const handleSaveAll = useCallback(async (augParams = null) => {
         try {
             if (!fileSystem.files || fileSystem.files.length === 0) {
                 setSaveMessage({ type: 'info', text: 'No files to save.' });
@@ -230,8 +234,7 @@ function Editor() {
                 return;
             }
 
-            const result = await fileSystem.saveProjectToBackend(doAugment);
-
+            const result = await fileSystem.saveProjectToBackend(augParams);
             if (result && result.success) {
                 setSaveMessage({ type: 'success', text: `Successfully saved ${result.count} images to dataset!` });
             } else {
@@ -418,16 +421,21 @@ function Editor() {
     }, [fileSystem.activeFileData, annotationsHook.annotations, formatConverter]);
 
     const handleFileSwitch = useCallback((fileId, e) => {
-        if (fileSystem.activeFileId && annotationsHook.annotations) {
+        // Explicitly save the current file before switching
+        if (fileSystem.activeFileId && isEditorReady && annotationsHook.annotations) {
             const options = {};
             if (stage.imageObj) {
                 options.width = stage.imageObj.naturalWidth;
                 options.height = stage.imageObj.naturalHeight;
             }
-            fileSystem.updateActiveAnnotations(annotationsHook.annotations, options);
+            // Pass the current file ID explicitly to avoid state race conditions in useFileSystem
+            fileSystem.updateActiveAnnotations(annotationsHook.annotations, {
+                ...options,
+                targetFileId: fileSystem.activeFileId
+            });
         }
         fileSystem.handleFileClick(fileId, e);
-    }, [fileSystem, annotationsHook.annotations, stage.imageObj]);
+    }, [fileSystem, isEditorReady, annotationsHook.annotations, stage.imageObj]);
 
     const handleDoubleClick = useCallback(() => {
         if (drawTools.tool === 'poly' && drawTools.currentPolyPoints.length >= 3) {
@@ -630,7 +638,7 @@ function Editor() {
                 selectedModel={aiModels.selectedModel}
                 onSelectModel={aiModels.actions.setModel}
                 onOpenModelManager={() => navigate('/models')}
-                onOpenTrainModal={() => navigate('/models')}
+                onSaveAll={handleSaveWithConfirm}
 
                 onDetectAll={drawTools.handleDetectAll}
                 eraserSize={drawTools.eraserSize}
@@ -661,6 +669,7 @@ function Editor() {
                                 isProcessing={fileSystem.isProcessing}
                                 processingProgress={fileSystem.processingProgress}
                                 onExportProject={() => setShowExportModal(true)}
+                                onSyncWithBackend={fileSystem.syncWithBackend}
                             />
                         </div>
                         <div className="panel-resizer left" onMouseDown={() => setIsResizingLeft(true)} />
@@ -802,21 +811,13 @@ function Editor() {
                 onCancel={() => setSaveModal({ isOpen: false, step: 'confirm' })}
             />
 
-            {/* Augmentation Option Modal */}
-            <GlassConfirmModal
+            {/* Augmentation Selection Modal */}
+            <AugmentationModal
                 isOpen={saveModal.isOpen && saveModal.step === 'augment'}
-                title="Data Augmentation"
-                message="Enable Data Augmentation (Flip, Noise, Dark)? This will generate extra images for training."
-                confirmText="Enable Augmentation"
-                cancelText="Skip"
-                variant="info"
-                onConfirm={() => {
+                onClose={() => setSaveModal({ isOpen: false, step: 'confirm' })}
+                onConfirm={(enabledTypes) => {
                     setSaveModal({ isOpen: false, step: 'confirm' });
-                    handleSaveAll(true);
-                }}
-                onCancel={() => {
-                    setSaveModal({ isOpen: false, step: 'confirm' });
-                    handleSaveAll(false);
+                    handleSaveAll(enabledTypes);
                 }}
             />
         </div>

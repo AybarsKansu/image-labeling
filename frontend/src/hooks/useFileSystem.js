@@ -35,64 +35,33 @@ export function useFileSystem(projectId = null) {
 
     // Live query for file list (only metadata, no blobs for performance)
     const files = useLiveQuery(
-        () => {
-            if (isValidProject) {
-                return db.files.where('project_id').equals(projectId).reverse().sortBy('created_at');
-            } else {
-                // Fallback: If no project ID (or invalid), show all files (Legacy behavior)
-                // In a stricter system, we might want to show nothing or a specific "Unassigned" list
-                return db.files.orderBy('created_at').reverse().toArray();
+        async () => {
+            if (!isValidProject) {
+                // Return all files sorted by creation date
+                return await db.files.orderBy('created_at').reverse().toArray();
+            }
+
+            try {
+                // Get all files for this project
+                const projectFiles = await db.files
+                    .where('project_id')
+                    .equals(projectId)
+                    .toArray();
+
+                // Sort in memory for maximum reliability
+                return projectFiles.sort((a, b) => {
+                    const dateA = new Date(a.created_at || 0);
+                    const dateB = new Date(b.created_at || 0);
+                    return dateB - dateA;
+                });
+            } catch (err) {
+                console.error("Failed to query files:", err);
+                return [];
             }
         },
-        [projectId, isValidProject], // dependencies
-        [] // default result
+        [projectId, isValidProject],
+        []
     );
-
-    // Initialize Web Worker
-    useEffect(() => {
-        workerRef.current = new Worker(
-            new URL('../workers/fileProcessor.worker.js', import.meta.url),
-            { type: 'module' }
-        );
-
-        workerRef.current.onmessage = handleWorkerMessage;
-
-        // Load saved class names
-        getSetting('classNames').then(saved => {
-            if (saved) setClassNames(saved);
-        });
-
-        return () => {
-            workerRef.current?.terminate();
-            // Revoke any active blob URL
-            if (activeBlobUrlRef.current) {
-                URL.revokeObjectURL(activeBlobUrlRef.current);
-            }
-        };
-    }, []);
-
-    // Handle messages from Web Worker
-    const handleWorkerMessage = useCallback((e) => {
-        const { type, payload } = e.data;
-
-        switch (type) {
-            case 'PROCESS_PROGRESS':
-                setProcessingProgress(payload);
-                break;
-
-            case 'PROCESS_COMPLETE':
-                handleProcessComplete(payload);
-                break;
-
-            case 'PROCESS_ERROR':
-                setError(payload.error);
-                setIsProcessing(false);
-                break;
-
-            default:
-                break;
-        }
-    }, [projectId]); // Depend on projectId for process complete handler context
 
     // Handle completed file processing (Images + Labels pairing)
     const handleProcessComplete = useCallback(async (result) => {
@@ -102,8 +71,6 @@ export function useFileSystem(projectId = null) {
             let processedItems = 0;
 
             // Determine Target Project ID
-            // If projectId is valid, use it. If not, use the default "Legacy" ID or a fallback.
-            // Ideally projectId should be passed.
             const targetPid = (isValidProject) ? projectId : (await db.projects.orderBy('created_at').first())?.id;
 
             if (!targetPid) {
@@ -111,36 +78,20 @@ export function useFileSystem(projectId = null) {
             }
 
             // ---------------------------------------------------------
-            // ADIM 1: Görüntüleri İşle (Toplu Okuma Stratejisi)
+            // ADIM 1: Görüntüleri İşle
             // ---------------------------------------------------------
-
-            // Önce tüm gelen resimlerin baseName'lerini çıkar
             const incomingImageBaseNames = images.map(img => img.baseName);
-
-            // Veritabanına TEK SEFERDE sor: "Bu isimlerden hangileri bende var?"
-            // (Dexie'nin anyOf operatörü bu işi yapar)
             const existingRecordsArray = await db.files
                 .where('baseName')
                 .anyOf(incomingImageBaseNames)
                 .toArray();
 
-            // Filter existing records to ONLY those in current project (if we want to allow duplicates across projects)
-            // For now, let's assume baseName uniqueness is global or we filter by checking project_id if needed.
-            // But usually unique filename per project is safest.
-            // Let's rely on simple baseName match for update regardless of project for now to keep logic simple,
-            // OR strictly filter existing by project_id.
-            // Better: Filter existing by project too.
             const existingInProject = existingRecordsArray.filter(f => f.project_id === targetPid);
-
-            // Hızlı erişim için array'i Map'e çevir (Lookup Table)
-            // Key: baseName, Value: Record
             const existingMap = new Map(existingInProject.map(rec => [rec.baseName, rec]));
 
             const imageUpdates = images.map(img => {
-                const existing = existingMap.get(img.baseName); // Artık await yok, anlık erişim!
-
+                const existing = existingMap.get(img.baseName);
                 if (existing) {
-                    // Merge Logic
                     return {
                         ...existing,
                         name: img.name,
@@ -149,12 +100,10 @@ export function useFileSystem(projectId = null) {
                         thumbnail: img.thumbnail,
                         width: img.width,
                         height: img.height,
-                        // Eğer label verisi zaten varsa PENDING, yoksa MISSING_LABEL
                         status: existing.label_data ? FileStatus.PENDING : FileStatus.MISSING_LABEL,
-                        project_id: targetPid // Ensure affiliation
+                        project_id: targetPid
                     };
                 } else {
-                    // Create Logic
                     return {
                         name: img.name,
                         baseName: img.baseName,
@@ -167,44 +116,33 @@ export function useFileSystem(projectId = null) {
                         label_data: null,
                         status: FileStatus.MISSING_LABEL,
                         created_at: new Date().toISOString(),
-                        project_id: targetPid // Tag with Project ID
+                        project_id: targetPid
                     };
                 }
             });
 
-            // Toplu Yazma
             if (imageUpdates.length > 0) {
                 await db.files.bulkPut(imageUpdates);
                 processedItems += images.length;
                 setProcessingProgress({ processed: processedItems, total: totalToProcess, phase: 'saving' });
 
-                // UPDATE PROJECT METADATA
-                // 1. Update file count
-                // 2. Set thumbnail if missing
-                // 3. Update 'updated_at'
                 const currentProject = await db.projects.get(targetPid);
                 if (currentProject) {
                     const changes = {
                         updated_at: new Date().toISOString(),
                         file_count: (currentProject.file_count || 0) + images.length
                     };
-
-                    // If project has no thumbnail, use the first image's thumbnail
                     if (!currentProject.thumbnail && imageUpdates[0].thumbnail) {
                         changes.thumbnail = imageUpdates[0].thumbnail;
                     }
-
                     await db.projects.update(targetPid, changes);
                 }
             }
 
             // ---------------------------------------------------------
-            // ADIM 2: Etiketleri İşle (Yine Toplu Okuma)
+            // ADIM 2: Etiketleri İşle
             // ---------------------------------------------------------
-
             const incomingLabelBaseNames = labels.map(l => l.baseName);
-
-            // Veritabanından etiketlenecek dosyaları TEK SEFERDE çek
             const freshRecordsArray = await db.files
                 .where('baseName')
                 .anyOf(incomingLabelBaseNames)
@@ -214,10 +152,8 @@ export function useFileSystem(projectId = null) {
             const freshMap = new Map(freshInProject.map(rec => [rec.baseName, rec]));
 
             const labelUpdates = [];
-
             for (const label of labels) {
                 const existing = freshMap.get(label.baseName);
-
                 if (existing) {
                     labelUpdates.push({
                         ...existing,
@@ -227,7 +163,6 @@ export function useFileSystem(projectId = null) {
                         project_id: targetPid
                     });
                 } else {
-                    // Placeholder (Resmi olmayan etiket)
                     labelUpdates.push({
                         name: `(Missing Image) ${label.baseName}`,
                         baseName: label.baseName,
@@ -259,25 +194,72 @@ export function useFileSystem(projectId = null) {
             setError(err.message);
             setIsProcessing(false);
         }
-    }, [projectId, isValidProject]);
+    }, [projectId, isValidProject, classNames]);
+
+    // Handle messages from Web Worker
+    const handleWorkerMessage = useCallback((e) => {
+        const { type, payload } = e.data;
+        switch (type) {
+            case 'PROCESS_PROGRESS':
+                setProcessingProgress(payload);
+                break;
+            case 'PROCESS_COMPLETE':
+                handleProcessComplete(payload);
+                break;
+            case 'PROCESS_ERROR':
+                setError(payload.error);
+                setIsProcessing(false);
+                break;
+            default:
+                break;
+        }
+    }, [projectId, handleProcessComplete]); // Depend on projectId for process complete handler context
+
+    // Initialize Web Worker
+    useEffect(() => {
+        workerRef.current = new Worker(
+            new URL('../workers/fileProcessor.worker.js', import.meta.url),
+            { type: 'module' }
+        );
+
+        getSetting('classNames').then(saved => {
+            if (saved) setClassNames(saved);
+        });
+
+        return () => {
+            workerRef.current?.terminate();
+            if (activeBlobUrlRef.current) URL.revokeObjectURL(activeBlobUrlRef.current);
+        };
+    }, []);
+
+    // Keep worker.onmessage updated with latest closure
+    useEffect(() => {
+        if (workerRef.current) {
+            workerRef.current.onmessage = handleWorkerMessage;
+        }
+    }, [handleWorkerMessage]);
 
     /**
      * Clear all files from the project (Local + Backend)
      */
     const clearProject = useCallback(async () => {
         try {
+            if (!isValidProject) return;
             setIsProcessing(true);
 
-            // 1. Revoke all blob URLs to prevent memory leaks
-            const allFiles = await db.files.toArray();
-            allFiles.forEach(f => {
+            // 1. Revoke blob URLs for project files
+            const projectFiles = await db.files.where('project_id').equals(projectId).toArray();
+            projectFiles.forEach(f => {
                 if (f.blobUrl) URL.revokeObjectURL(f.blobUrl);
             });
 
-            // 2. Clear IndexedDB
-            await db.files.clear();
+            // 2. Clear IndexedDB for this project
+            await db.files.where('project_id').equals(projectId).delete();
 
-            // 3. Reset state
+            // 3. Update project count
+            await db.projects.update(projectId, { file_count: 0, thumbnail: null });
+
+            // 4. Reset state
             setActiveFileId(null);
             setActiveFileData(null);
             setIsProcessing(false);
@@ -286,7 +268,7 @@ export function useFileSystem(projectId = null) {
             setError('Failed to clear project: ' + err.message);
             setIsProcessing(false);
         }
-    }, []);
+    }, [projectId, isValidProject]);
 
     /**
      * Helper: Read file as text
@@ -469,7 +451,7 @@ export function useFileSystem(projectId = null) {
             }
         }
 
-    }, []);
+    }, [projectId, isValidProject, activeFileId]);
 
     // Deprecate direct ingestFiles in favor of one that logs or redirects?
     // For now, let's keep ingestFiles as an alias or direct worker access if needed, 
@@ -482,6 +464,31 @@ export function useFileSystem(projectId = null) {
      */
     // Race condition guard
     const loadingFileIdRef = useRef(null);
+
+    /**
+     * Keep activeFileData in sync with DB updates (e.g. from Worker or ingestion)
+     */
+    useEffect(() => {
+        if (!activeFileId || !files || files.length === 0 || !activeFileData) return;
+
+        const currentInDb = files.find(f => f.id === activeFileId);
+        if (currentInDb) {
+            // Check if label data has changed in the database since we loaded it
+            // Using a simple check to see if we should refresh labels
+            const dbHasLabels = !!currentInDb.label_data;
+            const stateHasLabels = !!activeFileData.label_data;
+
+            // If labels arrived in DB but we don't have them in state, SYNC!
+            if (dbHasLabels && !stateHasLabels) {
+                console.log(`[FileSystem] Ingestion finished for active file ${currentInDb.name}, updating UI...`);
+                setActiveFileData(prev => ({
+                    ...prev,
+                    label_data: currentInDb.label_data,
+                    annotations: parseLabelData(currentInDb.label_data, classNames, currentInDb.width, currentInDb.height)
+                }));
+            }
+        }
+    }, [files, activeFileId, classNames, activeFileData]);
 
     /**
      * Select a file to display on canvas.
@@ -555,7 +562,9 @@ export function useFileSystem(projectId = null) {
      * Update annotations for the active file.
      */
     const updateActiveAnnotations = useCallback(async (annotations, options = {}) => {
-        if (!activeFileId) return;
+        // Use provided targetFileId (robust for fast switching) or fallback to current state
+        const fileId = options.targetFileId || activeFileId;
+        if (!fileId) return;
 
         const { width, height, format = 'yolo' } = options;
         const w = width || activeFileData?.width || 0;
@@ -563,7 +572,7 @@ export function useFileSystem(projectId = null) {
 
         const labelData = serializeAnnotations(annotations, format, classNames, w, h);
 
-        await updateFile(activeFileId, {
+        await updateFile(fileId, {
             label_data: labelData,
             width: w || undefined,
             height: h || undefined,
@@ -691,22 +700,30 @@ export function useFileSystem(projectId = null) {
     /**
      * Save Project to Backend (dataset/)
      */
-    const saveProjectToBackend = useCallback(async (enableAugmentation = false) => {
+    const saveProjectToBackend = useCallback(async (augParams = null) => {
         setIsProcessing(true);
         setProcessingProgress({ processed: 0, total: 0, phase: 'saving' });
         try {
-            const files = await db.files.toArray();
+            // ONLY get files belonging to THIS project
+            const projectFiles = await db.files.where('project_id').equals(projectId).toArray();
+            console.log("Project files" + projectFiles);
+            console.log(`[SaveDebug] Found ${projectFiles.length} files to save for project ${projectId}`);
+
             let count = 0;
-            const total = files.length;
+            const total = projectFiles.length;
             const axios = (await import('axios')).default;
 
-            for (const file of files) {
+            for (const file of projectFiles) {
+                console.log(`[SaveDebug] Processing file: ${file.name}`);
                 if (!file.blob || !(file.blob instanceof Blob)) continue;
 
                 const formData = new FormData();
                 formData.append('file', file.blob, file.name);
                 formData.append('image_name', file.name);
-                formData.append('augmentation', enableAugmentation ? 'true' : 'false');
+
+                if (augParams) {
+                    formData.append('aug_params', JSON.stringify(augParams));
+                }
 
                 let anns = [];
                 if (file.label_data) {
@@ -722,7 +739,9 @@ export function useFileSystem(projectId = null) {
                 }
                 formData.append('annotations', JSON.stringify(anns));
 
-                await axios.post('/api/save', formData);
+                // Use new Project-based Sync API
+                if (!projectId) throw new Error("No project ID available for sync");
+                await axios.post(`/api/projects/${projectId}/sync`, formData);
                 count++;
                 setProcessingProgress({ processed: count, total, phase: 'saving' });
             }
@@ -733,7 +752,86 @@ export function useFileSystem(projectId = null) {
             setIsProcessing(false);
             return { success: false, error: err.message };
         }
-    }, [classNames]);
+    }, [classNames, projectId]);
+
+    /**
+     * Pull project files/labels from backend storage into local IndexedDB
+     */
+    const syncWithBackend = useCallback(async () => {
+        if (!isValidProject) return { success: false, error: 'Invalid project' };
+
+        setIsProcessing(true);
+        setProcessingProgress({ processed: 0, total: 0, phase: 'syncing' });
+
+        try {
+            const axios = (await import('axios')).default;
+            const response = await axios.get(`/api/projects/${projectId}/files`);
+            const remoteFilenames = response.data.files || [];
+
+            if (remoteFilenames.length === 0) {
+                setIsProcessing(false);
+                return { success: true, count: 0 };
+            }
+
+            setProcessingProgress({ processed: 0, total: remoteFilenames.length, phase: 'syncing' });
+
+            // 1. Get existing files for this project to avoid duplicates
+            const localFiles = await db.files.where('project_id').equals(projectId).toArray();
+            const localMap = new Map(localFiles.map(f => [f.name, f]));
+
+            const newFiles = [];
+            let count = 0;
+
+            for (const filename of remoteFilenames) {
+                if (localMap.has(filename)) {
+                    count++;
+                    continue;
+                }
+
+                // Create a record with backend_url
+                // Since we don't have the blob, we mark status as SYNCED (it's on backend)
+                // but we might want a way to lazy-load it.
+                // For now, we point backend_url to our new static mount.
+                const backendUrl = `/static/projects/${projectId}/raw_data/images/${filename}`;
+
+                const fileData = {
+                    name: filename,
+                    baseName: filename.replace(/\.[^/.]+$/, ""),
+                    path: filename,
+                    type: 'image',
+                    blob: null,
+                    thumbnail: null, // We'll lack thumbnails until loaded
+                    backend_url: backendUrl,
+                    status: FileStatus.SYNCED,
+                    created_at: new Date().toISOString(),
+                    project_id: projectId
+                };
+
+                newFiles.push(fileData);
+                count++;
+                if (newFiles.length % 10 === 0) {
+                    setProcessingProgress({ processed: count, total: remoteFilenames.length, phase: 'syncing' });
+                }
+            }
+
+            if (newFiles.length > 0) {
+                await db.files.bulkAdd(newFiles);
+
+                // Update project count to match reality
+                const totalCount = await db.files.where('project_id').equals(projectId).count();
+                await db.projects.update(projectId, { file_count: totalCount });
+            }
+
+            setIsProcessing(false);
+            return { success: true, count: newFiles.length };
+
+        } catch (err) {
+            console.error('Sync from backend failed:', err);
+            setIsProcessing(false);
+            setError(err.message);
+            return { success: false, error: err.message };
+        }
+    }, [projectId, isValidProject]);
 
     // Multi-selection handlers
     const handleFileClick = useCallback((fileId, event) => {
@@ -823,7 +921,8 @@ export function useFileSystem(projectId = null) {
         updateActiveAnnotations,
         updateFileAnnotations,
         removeFile,
-        setClassNames
+        setClassNames,
+        syncWithBackend
     };
 }
 

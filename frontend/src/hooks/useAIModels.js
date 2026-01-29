@@ -180,11 +180,19 @@ export const useAIModels = (initialModel = null, textPrompt) => {
         deleteModel,
         startTraining: async (config) => {
             try {
-                // Config should be { base_model, epochs, batch_size }
+                // Config should be { base_model, epochs, batch_size, project_ids... }
                 const formData = new FormData();
                 if (config.base_model) formData.append('base_model', config.base_model);
                 if (config.epochs) formData.append('epochs', config.epochs);
                 if (config.batch_size) formData.append('batch_size', config.batch_size);
+
+                // Handle project_id (legacy) or project_ids (new)
+                if (config.project_ids) {
+                    formData.append('project_ids', config.project_ids);
+                } else if (config.project_id) {
+                    // Fallback for symmetry, but likely unused now
+                    formData.append('project_id', config.project_id);
+                }
 
                 await axios.post(`${API_URL}/train-model`, formData, {
                     headers: { 'Content-Type': 'multipart/form-data' }

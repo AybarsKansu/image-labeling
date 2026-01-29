@@ -102,13 +102,17 @@ class ModelManager:
         """
         Returns list of all models from registry with download status.
         Merges YAML config with local file status.
+        Also includes locally discovered (user-trained) models.
         
         Returns:
             List of ModelInfo objects with is_downloaded status
         """
         result = []
+        registry_ids = set()
         
+        # 1. Models from Registry (YAML)
         for model_id, data in self._registry.items():
+            registry_ids.add(model_id)
             # Check if model file exists locally
             model_path = self._models_dir / model_id
             is_downloaded = model_path.exists()
@@ -123,6 +127,30 @@ class ModelManager:
                 is_downloaded=is_downloaded
             )
             result.append(model_info)
+        
+        # 2. Add Discovered Models (Not in Registry)
+        for model_id in self._models.keys():
+            if model_id not in registry_ids:
+                # This is a discovered model (e.g. user-trained)
+                # Need to determine type/family best-effort
+                model_type = ModelType.DETECTION
+                if "seg" in model_id.lower():
+                    model_type = ModelType.SEGMENTATION
+                
+                model_family = ModelFamily.YOLO
+                if "sam" in model_id.lower():
+                    model_family = ModelFamily.SAM
+
+                model_info = ModelInfo(
+                    id=model_id,
+                    name=f"Custom: {model_id}",
+                    type=model_type,
+                    family=model_family,
+                    url="", # No URL for local models
+                    description="User-trained or locally added model",
+                    is_downloaded=True
+                )
+                result.append(model_info)
         
         return result
     
@@ -139,7 +167,12 @@ class ModelManager:
         print("Scanning for models...")
         
         if search_paths is None:
-            search_paths = [str(self._models_dir / "*.pt")]
+             # Default: standard models dir AND all project models
+            search_paths = [
+                str(self._models_dir / "*.pt"),
+                # Search recursively in valid project model dirs
+                str(self._models_dir.parent / "storage" / "projects" / "*" / "models" / "*.pt")
+            ]
         
         # Discover local files
         local_files = set()

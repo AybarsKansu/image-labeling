@@ -85,7 +85,7 @@ async def save_data(
     annotations: str = Form(...),
     image_name: str = Form(None),
     augmentation: str = Form("false"),
-    augment: str = Form(None), # Backward compatibility
+    aug_params: str = Form(None), 
     dataset_service = Depends(get_dataset_service)
 ):
     """
@@ -97,33 +97,41 @@ async def save_data(
         image_bytes = await file.read()
         img = decode_image(image_bytes)
         
-        # Determine augmentation flag (check both names)
-        aug_val = augment if augment is not None else augmentation
-        do_augment = aug_val.lower() == "true"
+        # Determine augmentation types
+        enabled_types = []
+        if aug_params:
+            try:
+                params = json.loads(aug_params)
+                if isinstance(params, list):
+                    enabled_types = params
+                elif isinstance(params, dict):
+                    # Expecting {"hflip": true, "vflip": false, ...}
+                    enabled_types = [k for k, v in params.items() if v]
+            except:
+                pass
+        elif augmentation.lower() == "true":
+            # Default backward compatibility: apply all
+            enabled_types = ["hflip", "vflip", "rotate", "brightness", "noise", "blur"]
         
-        # Detect Format: 
-        # Standard: [{"label": "...", "points": [...]}, ...]
-        # TOON: {"v": "1.0", "m": [...], "c": [...], "d": [...]}
-        
+        # Detect Format and Save
         if isinstance(data, list):
-            # Standard list format
-            name_base = dataset_service.save_annotation(
+            name_base = await dataset_service.save_annotation(
                 img=img,
                 annotations=data,
                 image_name=image_name,
-                augment=do_augment
+                augment_types=enabled_types
             )
         elif isinstance(data, dict) and "v" in data and "d" in data:
-            # TOON format
             name_base = dataset_service.save_entry(
                 img=img,
                 toon_data=data,
-                augment=do_augment
+                augment_types=enabled_types
             )
         else:
             raise HTTPException(status_code=400, detail="Unsupported annotation format")
         
-        aug_msg = " (+9 augmentations)" if do_augment else ""
+        aug_count = len(enabled_types)
+        aug_msg = f" (+{aug_count} types augmented)" if aug_count > 0 else ""
         return JSONResponse({
             "success": True, 
             "message": f"Saved {name_base}{aug_msg}"

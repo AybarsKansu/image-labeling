@@ -5,3 +5,4 @@ export { default as PreprocessingModal } from './PreprocessingModal';
 export { default as TrainPanel } from './TrainPanel';
 export { default as ClassImportModal } from './ClassImportModal';
 export { default as ExportModal } from './ExportModal';
+export { AugmentationModal } from './AugmentationModal';

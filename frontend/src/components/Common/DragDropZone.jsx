@@ -184,6 +184,8 @@ const DragDropZone = ({ onImageUpload }) => {
         >
             <input {...getInputProps()} />
 
+
+
             {/* Drag overlay */}
             {isDragActive && (
                 <motion.div
@@ -233,7 +235,7 @@ const DragDropZone = ({ onImageUpload }) => {
 
                 {/* Quick Action Cards */}
                 <motion.div
-                    className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full"
+                    className="grid grid-cols-1 md:grid-cols-1 gap-4 w-full"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.5 }}
@@ -245,20 +247,20 @@ const DragDropZone = ({ onImageUpload }) => {
                         onClick={open}
                         color="indigo"
                     />
-                    <QuickActionCard
+                    {/* <QuickActionCard
                         icon={Camera}
                         title="Connect Camera"
                         subtitle="Live capture mode"
                         onClick={() => alert('Camera feature coming soon!')}
                         color="emerald"
-                    />
-                    <QuickActionCard
+                    /> */}
+                    {/* <QuickActionCard
                         icon={Clock}
                         title="Recent Projects"
                         subtitle="Continue your work"
                         onClick={() => alert('Recent projects coming soon!')}
                         color="indigo"
-                    />
+                    /> */}
                 </motion.div>
             </motion.div>
 

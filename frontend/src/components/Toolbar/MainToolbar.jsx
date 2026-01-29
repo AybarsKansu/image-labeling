@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import {
     MousePointer, Hand, Square, Pentagon, Pencil, Bot, Scissors, Eraser,
     Undo2, Redo2, Trash2, Download, Upload, ChevronDown,
-    Settings, Scan, GraduationCap
+    Settings, Scan, Save
 } from 'lucide-react';
 import { MODEL_CONFIG } from '../../constants/modelConfig';
 
@@ -26,7 +26,7 @@ const MainToolbar = ({
     selectedModel,
     onSelectModel,
     onOpenModelManager,
-    onOpenTrainModal,
+    onSaveAll,
     onDetectAll,
     onUndo,
     onRedo,
@@ -280,14 +280,14 @@ const MainToolbar = ({
                     <span className="text-xs font-medium">{textPrompt?.trim() ? 'Segment' : 'Detect'}</span>
                 </button>
 
-                {/* Prominent Train Button */}
+                {/* Prominent Save Button */}
                 <button
                     className="btn-tactile btn-success"
-                    onClick={onOpenTrainModal}
-                    title="Train Model"
+                    onClick={onSaveAll}
+                    title="Save to Dataset"
                 >
-                    <GraduationCap size={14} />
-                    <span className="text-xs font-medium">Train</span>
+                    <Save size={14} />
+                    <span className="text-xs font-medium">Save All</span>
                 </button>
             </div>
 

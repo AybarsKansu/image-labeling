@@ -3,6 +3,7 @@ import os
 import shutil
 import json
 import traceback
+import uuid
 from pathlib import Path
 from ultralytics import YOLO
 from fastapi import HTTPException
@@ -74,9 +75,10 @@ class TrainingService:
         preprocess_params: dict,
         model_manager: ModelManager,
         dataset_service: DatasetService,
-        class_service: ClassService
+        class_service: ClassService,
+        project_ids: list = None  # Changed from project_id: str to project_ids: list
     ):
-        """Background task for model training with advanced options."""
+        """Background task for model training (Legacy & Project-based)."""
         global _training_status
         settings = get_settings()
         
@@ -88,51 +90,84 @@ class TrainingService:
         _training_status.message = "Initializing..."
         
         try:
-            # 1. Preprocessing (Includes Split & Remap)
-            target_data_dir = settings.DATASET_DIR
+            # 1. Preparation
             
-            if preprocess_params is None:
-                preprocess_params = {}
+            yaml_path = None
+            runs_dir = "runs" # Default local
+            job_id = f"job_{uuid.uuid4().hex[:8]}"
+            
+            # Determine project flow
+            if project_ids and len(project_ids) > 0:
+                # MULTI-PROJECT FLOW
+                _training_status.message = f"Preparing Job {job_id} ({len(project_ids)} projects)..."
                 
-            if _training_status.stop_requested: raise InterruptedError("Training cancelled")
-    
-            _training_status.message = "Preprocessing..."
-            success = dataset_service.preprocess_dataset(
-                resize_mode=preprocess_params.get('resize_mode', 'none'),
-                enable_tiling=preprocess_params.get('enable_tiling', False),
-                tile_size=int(preprocess_params.get('tile_size', 640)),
-                tile_overlap=float(preprocess_params.get('tile_overlap', 0.2))
-            )
-            
-            if success:
-                target_data_dir = settings.processed_dir # Use 'dataset/processed'
-    
-            # 2. Prepare Data YAML
-            classes = class_service.get_all_classes_sorted()
-            
-            # Use generated split files
-            train_txt = settings.DATASET_DIR / "autosplit_train.txt"
-            val_txt = settings.DATASET_DIR / "autosplit_val.txt"
-            
-            if not train_txt.exists() or not val_txt.exists():
-                train_path_str = (target_data_dir / "images").as_posix()
-                val_path_str = (target_data_dir / "images").as_posix()
+                # Helper to convert params
+                resize_mode = 'none'
+                if preprocess_params:
+                    resize_mode = preprocess_params.get('resize_mode', 'none')
+                
+                # Prepare merged dataset with class remapping
+                job_dir = dataset_service.prepare_multi_project_training_job(
+                    job_id=job_id,
+                    project_ids=project_ids,
+                    resize_mode=resize_mode,
+                    tiling_config=preprocess_params
+                )
+                
+                yaml_path = job_dir / "data.yaml"
+                runs_dir = str(job_dir / "runs")
+                
             else:
-                train_path_str = train_txt.as_posix()
-                val_path_str = val_txt.as_posix()
-    
-            yaml_content = f"""
-path: {settings.DATASET_DIR.as_posix()}
-train: {train_path_str}
-val: {val_path_str}
-names:
-"""
-            for i, c in enumerate(classes):
-                yaml_content += f"  {i}: {c}\\n"
-            
-            yaml_path = settings.DATASET_DIR / "data.yaml"
-            with open(yaml_path, "w", encoding="utf-8") as f:
-                f.write(yaml_content)
+                # LEGACY FLOW
+                # 1. Preprocessing (Includes Split & Remap)
+                target_data_dir = settings.DATASET_DIR
+                
+                if preprocess_params is None:
+                    preprocess_params = {}
+                    
+                if _training_status.stop_requested: raise InterruptedError("Training cancelled")
+        
+                _training_status.message = "Preprocessing..."
+                success = dataset_service.preprocess_dataset(
+                    resize_mode=preprocess_params.get('resize_mode', 'none'),
+                    enable_tiling=preprocess_params.get('enable_tiling', False),
+                    tile_size=int(preprocess_params.get('tile_size', 640)),
+                    tile_overlap=float(preprocess_params.get('tile_overlap', 0.2))
+                )
+                
+                if success:
+                    target_data_dir = settings.processed_dir # Use 'dataset/processed'
+        
+                # 2. Prepare Data YAML
+                classes = class_service.get_all_classes_sorted()
+                
+                # Paths relative to settings.DATASET_DIR for YAML clarity
+                train_txt = settings.DATASET_DIR / "autosplit_train.txt"
+                val_txt = settings.DATASET_DIR / "autosplit_val.txt"
+                
+                # Use relative paths if possible (YOLO prefers relative to 'path' key)
+                if train_txt.exists() and val_txt.exists():
+                    train_path_str = "autosplit_train.txt"
+                    val_path_str = "autosplit_val.txt"
+                else:
+                    # Fallback to images folder if split missing
+                    train_path_str = "images"
+                    val_path_str = "images"
+        
+                yaml_content = f"path: {settings.DATASET_DIR.as_posix()}\n"
+                yaml_content += f"train: {train_path_str}\n"
+                yaml_content += f"val: {val_path_str}\n"
+                yaml_content += "names:\n"
+                
+                for i, c in enumerate(classes):
+                    # Quote class names to prevent YAML scanner errors with special chars
+                    clean_name = str(c).strip().replace('"', '\\"')
+                    yaml_content += f"  {i}: \"{clean_name}\"\n"
+                
+                yaml_path = settings.DATASET_DIR / "data.yaml"
+                with open(yaml_path, "w", encoding="utf-8") as f:
+                    f.write(yaml_content)
+
     
             # 3. Model Training
             _training_status.message = "Starting training..."
@@ -175,7 +210,7 @@ names:
                 imgsz=imgsz,
                 plots=False,
                 device='cuda',
-                project="runs",
+                project=runs_dir,
                 name="train_job",
                 exist_ok=True,
                 val=True # Enable validation during training
@@ -184,21 +219,46 @@ names:
             _training_status.message = "Finalizing..."
             
             # 4. Save model
-            best_pt = Path("runs/train_job/weights/best.pt")
+            best_pt = Path(f"{runs_dir}/train_job/weights/best.pt")
             if best_pt.exists():
-                models_dir = Path("models")
-                models_dir.mkdir(exist_ok=True)
+                
+                target_project_id = None
+                if project_ids and len(project_ids) > 0:
+                    # If multiple projects, save to the FIRST one for now, or maybe a dedicated "Common" area?
+                    # Let's save to the FIRST selected project.
+                    target_project_id = project_ids[0]
+                
+                if target_project_id:
+                     # Save to Projects/models
+                    from app.services.project_service import get_project_service
+                    ps = get_project_service()
+                    models_dir = ps.get_project_path(target_project_id) / "models"
+                    models_dir.mkdir(exist_ok=True)
+                else:
+                    # Legacy Models dir
+                    models_dir = Path("models")
+                    models_dir.mkdir(exist_ok=True)
                 
                 target_name = custom_model_name.strip() if (custom_model_name and custom_model_name.strip()) else "custom_model.pt"
                 final_path = TrainingService._get_unique_model_path(models_dir, target_name)
                     
                 shutil.move(str(best_pt), str(final_path))
                 
-                model_manager.scan_models()
-                _training_status.message = f"Completed! Saved as {final_path.name}"
+                # Cleanup job folder if project mode?
+                if target_project_id:
+                    # Move runs folder to project/jobs/{job_id}
+                    try:
+                        job_logs_dest = ps.get_project_path(target_project_id) / "jobs" / job_id
+                        if Path(runs_dir).exists():
+                             shutil.copytree(runs_dir, job_logs_dest, dirs_exist_ok=True)
+                        
+                        # Cleanup temp
+                        shutil.rmtree(Path(runs_dir).parent, ignore_errors=True)
+                    except Exception as e:
+                        print(f"Log cleanup error: {e}")
                 
-                # Cleanup runs folder to save space? Optional.
-                # shutil.rmtree("runs") 
+                model_manager.scan_models()
+                _training_status.message = f"Completed! Saved as {final_path.name}" 
 
             else:
                 _training_status.message = "Failed: best.pt not found."
