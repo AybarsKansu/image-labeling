@@ -27,7 +27,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Image Labeling API",
         description="Computer Vision API for object detection, segmentation, and annotation",
-        version="2.0.0",
+        version="0.1.0",
         lifespan=lifespan
     )
     
@@ -81,7 +81,6 @@ def create_app() -> FastAPI:
         return {"status": "healthy"}
     
     return app
-
 
 # Create the application instance
 app = create_app()

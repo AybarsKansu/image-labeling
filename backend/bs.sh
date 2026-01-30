@@ -1,6 +1,5 @@
 #!/bin/bash
 
-cd backend
 if [ -d ".venv" ]; then
     echo "Activating .venv..."
     . .venv/bin/activate
