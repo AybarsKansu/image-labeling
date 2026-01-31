@@ -2,7 +2,6 @@
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from typing import List, Optional
 import json
-
 from app.services.project_service import ProjectService, get_project_service
 from app.services.dataset_service import DatasetService, get_dataset_service
 import cv2

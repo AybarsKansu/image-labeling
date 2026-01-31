@@ -17,12 +17,18 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.events import lifespan
-from app.api.v1.router import router as v1_router
+from app.api.router import router as api_router
 
 
 def create_app() -> FastAPI:
     """Application factory."""
     settings = get_settings()
+    
+    from app.core.database import engine, Base
+    from app.models import sql_models # Import models to register them
+    
+    # Create Tables
+    Base.metadata.create_all(bind=engine)
     
     app = FastAPI(
         title="Image Labeling API",
@@ -41,7 +47,7 @@ def create_app() -> FastAPI:
     )
     
     # Include API router
-    app.include_router(v1_router, prefix="/api")
+    app.include_router(api_router, prefix="/api")
     
     # Mount static files for analysis runs
     from fastapi.staticfiles import StaticFiles

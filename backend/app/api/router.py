@@ -1,11 +1,11 @@
 """
-API v1 Router.
+API Router.
 Aggregates all endpoint routers.
 """
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import inference, models, training, tools, videos, projects
+from app.api.endpoints import inference, models, training, tools, videos, projects
 
 router = APIRouter()
 

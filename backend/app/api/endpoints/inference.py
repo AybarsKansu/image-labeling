@@ -19,8 +19,8 @@ from app.schemas.inference import (
     BoundingBox
 )
 
+# for localhost:8000/docs to be organised
 router = APIRouter(tags=["inference"])
-
 
 @router.post("/detect-all", response_model=DetectAllResponse)
 async def detect_all(
@@ -28,6 +28,9 @@ async def detect_all(
     model_name: str = Form("yolo26x-seg.pt"),
     confidence: float = Form(0.5),
     max_det: int = Form(300),
+    tile_size: int = Form(640),
+    tile_overlap: float = Form(0.25),
+    nms_threshold: float = Form(0.45),
     enable_tiling: bool = Form(True),
     inference_service = Depends(get_inference_service)
 ):
@@ -37,12 +40,15 @@ async def detect_all(
     try:
         image_bytes = await file.read()
         img = decode_image(image_bytes)
-        
+
         detections = inference_service.detect_all(
             img=img,
             model_name=model_name,
             confidence=confidence,
             max_det=max_det,
+            tile_size=tile_size,
+            tile_overlap=tile_overlap,
+            nms_threshold=nms_threshold,
             enable_tiling=enable_tiling
         )
         
@@ -267,7 +273,7 @@ async def segment_by_text(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-
+"""
 @router.post("/segment-lasso", response_model=SegmentBoxResponse)
 async def segment_lasso(
     file: UploadFile = File(...),
@@ -276,10 +282,6 @@ async def segment_lasso(
     confidence: float = Form(0.2),
     inference_service = Depends(get_inference_service)
 ):
-    """
-    Detects objects within a freehand lasso polygon.
-    Masks image and runs detection on masked region.
-    """
     import cv2
     import numpy as np
     import uuid
@@ -378,3 +380,4 @@ async def segment_lasso(
     except Exception as e:
         print(f"Error in /segment-lasso: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+"""

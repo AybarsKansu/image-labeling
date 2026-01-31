@@ -1,5 +1,6 @@
 train logic, train file structure
 change train button logic, can be selected only if a model is selected
 
-klasör seçme, klasördeki her dosyayı tek bir format dosyasına çıkarma özellileri. Yanda bi sidebar üzerinde
 
+>> modellerin type'ı yerine detaylı kullanım rehberi gelebilir.
+>> backende storelanırken yolo formatında storelanıyor. toon'a çevrilmesi gerekebilir.

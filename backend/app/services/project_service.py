@@ -2,26 +2,26 @@
 import shutil
 import uuid
 import glob
+import os
+import json
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 from datetime import datetime
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from fastapi import Depends
 
 from app.core.config import get_settings
+from app.models.sql_models import Project, Image
+from app.core.database import get_db
 
 class ProjectService:
     """
-    Manages Project Directory Structure:
-    storage/
-      projects/
-        {uuid}/
-          raw_data/
-            images/
-            labels/
-          models/
-          jobs/
+    Manages Project Data via SQLite + File System.
     """
     
-    def __init__(self):
+    def __init__(self, db: Session):
+        self.db = db
         self._settings = get_settings()
         self._projects_root = self._settings.STORAGE_DIR / "projects"
         self._projects_root.mkdir(parents=True, exist_ok=True)
@@ -46,23 +46,27 @@ class ProjectService:
             
         return paths
 
-    def list_projects(self) -> List[Dict[str, Any]]:
-        """Scans the projects directory and returns metadata."""
-        import json
-        project_dirs = [d for d in self._projects_root.iterdir() if d.is_dir()]
-        results = []
+    def sync_projects_from_disk(self) -> int:
+        """
+        Scans disk for projects not in DB and registers them.
+        Returns number of new projects found.
+        """
+        print("Syncing projects from disk...")
+        disk_projects = [d for d in self._projects_root.iterdir() if d.is_dir()]
+        count = 0
         
-        for p_dir in project_dirs:
-            # Count images
-            try:
-                img_count = len(list((p_dir / "raw_data" / "images").glob("*.*")))
-            except:
-                img_count = 0
-                
-            stat = p_dir.stat()
-            created_at = datetime.fromtimestamp(stat.st_ctime).isoformat()
+        for p_dir in disk_projects:
+            p_id = p_dir.name
             
-            # Read name from meta.json or generate from date
+            # Check if exists in DB
+            db_project = self.db.query(Project).filter(Project.id == p_id).first()
+            if db_project:
+                continue
+            
+            # Create new project record
+            print(f"Found new project on disk: {p_id}")
+            
+            # Try to read meta.json for name
             name = None
             meta_file = p_dir / "meta.json"
             if meta_file.exists():
@@ -73,19 +77,103 @@ class ProjectService:
                 except:
                     pass
             
+            # Fallback name
             if not name:
-                # Generate name from creation date
+                stat = p_dir.stat()
                 dt = datetime.fromtimestamp(stat.st_ctime)
-                months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
-                         'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık']
-                name = f"Proje - {dt.day} {months[dt.month-1]} {dt.hour:02d}:{dt.minute:02d}"
+                name = f"Imported Project {dt.strftime('%Y-%m-%d')}"
+            
+            new_project = Project(
+                id=p_id,
+                name=name,
+                path=str(p_dir),
+                created_at=datetime.fromtimestamp(p_dir.stat().st_ctime)
+            )
+            self.db.add(new_project)
+            
+            # Sync Images for this project
+            self._sync_project_images(new_project)
+            
+            count += 1
+            
+        self.db.commit()
+        return count
+
+    def _sync_project_images(self, project: Project):
+        """Scans image directory and adds to files table."""
+        img_dir = Path(project.path) / "raw_data" / "images"
+        if not img_dir.exists():
+            return
+            
+        # Get existing files in DB to avoid dupes
+        existing_files = {
+            i.filename for i in self.db.query(Image).filter(Image.project_id == project.id).all()
+        }
+        
+        # Scan disk
+        disk_files = [f.name for f in img_dir.iterdir() if f.is_file() and not f.name.startswith('.')]
+        
+        new_images = []
+        for fname in disk_files:
+            if fname not in existing_files:
+                # Check if labeled
+                label_path = Path(project.path) / "raw_data" / "labels" / (Path(fname).stem + ".txt")
+                is_labeled = label_path.exists()
+                
+                new_images.append(Image(
+                    project_id=project.id,
+                    filename=fname,
+                    is_labeled=is_labeled
+                ))
+        
+        if new_images:
+            self.db.bulk_save_objects(new_images)
+
+    def create_project(self, name: str, description: str = None) -> Project:
+        """Creates a new project in DB and Disk."""
+        # 1. New ID
+        new_id = str(uuid.uuid4())
+        
+        # 2. Create DB Record
+        project = Project(
+            id=new_id,
+            name=name,
+            description=description,
+            path=str(self.get_project_path(new_id))
+        )
+        self.db.add(project)
+        self.db.commit()
+        self.db.refresh(project)
+        
+        # 3. Create Folders
+        self.ensure_project_structure(new_id)
+        
+        # 4. Save meta.json (for backup/compatibility)
+        meta = {"id": new_id, "name": name, "description": description}
+        with open(self.get_project_path(new_id) / "meta.json", "w") as f:
+            json.dump(meta, f)
+            
+        return project
+
+    def list_projects(self) -> List[Dict[str, Any]]:
+        """Returns list of projects with stats."""
+        # Sync first (optional, maybe make this async or manual triggered)
+        self.sync_projects_from_disk()
+        
+        projects = self.db.query(Project).all()
+        results = []
+        
+        for p in projects:
+            # Efficiently count images via DB
+            img_count = self.db.query(func.count(Image.id)).filter(Image.project_id == p.id).scalar()
             
             results.append({
-                "id": p_dir.name,
-                "name": name,
+                "id": p.id,
+                "name": p.name,
+                "description": p.description,
                 "file_count": img_count,
-                "created_at": created_at,
-                "path": str(p_dir)
+                "created_at": p.created_at.isoformat(),
+                "path": p.path
             })
             
         return sorted(results, key=lambda x: x["created_at"], reverse=True)
@@ -104,22 +192,31 @@ class ProjectService:
         return classes
 
     def get_project_files(self, project_id: str) -> List[str]:
-        """Returns list of image filenames in the project."""
-        p_path = self.get_project_path(project_id)
-        img_dir = p_path / "raw_data" / "images"
-        
-        if not img_dir.exists():
-            return []
+        """Returns list of image filenames via DB."""
+        # Ensure sync
+        project = self.db.query(Project).filter(Project.id == project_id).first()
+        if project:
+            self._sync_project_images(project)
+            self.db.commit()
             
-        files = [f.name for f in img_dir.iterdir() if f.is_file() and not f.name.startswith('.')]
-        return files
+        images = self.db.query(Image).filter(Image.project_id == project_id).all()
+        return [img.filename for img in images]
 
     def delete_project(self, project_id: str) -> bool:
-        p_path = self.get_project_path(project_id)
+        project = self.db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            return False
+            
+        # Delete from DB
+        self.db.delete(project)
+        self.db.commit()
+        
+        # Delete from Disk
+        p_path = Path(project.path)
         if p_path.exists():
             shutil.rmtree(p_path)
-            return True
-        return False
+            
+        return True
         
     def get_project_models(self, project_id: str) -> List[str]:
         p_path = self.get_project_path(project_id)
@@ -130,5 +227,6 @@ class ProjectService:
             
         return [f.name for f in models_dir.glob("*.pt")]
 
-def get_project_service():
-    return ProjectService()
+def get_project_service(db: Session = Depends(get_db)) -> ProjectService:
+    return ProjectService(db)
+

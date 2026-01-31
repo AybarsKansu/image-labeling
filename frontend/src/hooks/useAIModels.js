@@ -39,53 +39,53 @@ export const useAIModels = (initialModel = null, textPrompt) => {
     useEffect(() => {
         fetchModels();
     }, [fetchModels]);
-    // Training State (preserved from previous logic)
+    // Training State
+    const [taskId, setTaskId] = useState(null);
     const [trainingStatus, setTrainingStatus] = useState({
         isTraining: false,
-        progress: 0,
-        epoch: 0,
-        totalEpochs: 0,
-        map50: 0,
-        loss: 0,
-        message: 'Idle'
+        progress: 0.0,
+        message: 'Idle',
+        result: null,
+        error: null
     });
 
-    // Poll training status
+    // Poll training task status
     useEffect(() => {
         let intervalId;
 
         const checkStatus = async () => {
-            try {
-                const res = await axios.get(`${API_URL}/training-status`);
-                const data = res.data;
+            if (!taskId) return;
 
-                setTrainingStatus(prev => {
-                    // Only update if changed to avoid renders? Actually React handles that.
-                    // But we want to preserve derived client-side state if needed.
-                    // Data maps directly to our state shape mostly.
-                    return {
-                        isTraining: data.is_training,
-                        progress: data.progress,
-                        epoch: data.epoch,
-                        totalEpochs: data.total_epochs,
-                        message: data.message,
-                        loss: 0 // Backend doesn't send loss yet in status endpoint usually?
-                    };
+            try {
+                const res = await axios.get(`${API_URL}/tasks/${taskId}`);
+                const task = res.data;
+
+                setTrainingStatus({
+                    isTraining: task.status === 'processing' || task.status === 'pending',
+                    progress: task.progress || 0.0, // Ensure no NaN
+                    message: task.message || task.status,
+                    result: task.result,
+                    error: task.error
                 });
+
+                if (task.status === 'completed' || task.status === 'failed') {
+                    setTaskId(null); // Stop polling
+                }
             } catch (err) {
-                console.error("Failed to poll status:", err);
+                console.error("Failed to poll task:", err);
+                // Don't stop polling immediately on one error, maybe network blip
             }
         };
 
-        // Initial check on mount
-        checkStatus();
+        if (taskId) {
+            checkStatus(); // Initial check
+            intervalId = setInterval(checkStatus, 2000);
+        }
 
-        // Start polling if we think we might be training, OR just poll always at low freq?
-        // Better to poll always to catch updates from other tabs/reloads.
-        intervalId = setInterval(checkStatus, 2000);
-
-        return () => clearInterval(intervalId);
-    }, []);
+        return () => {
+            if (intervalId) clearInterval(intervalId);
+        };
+    }, [taskId]);
 
     // Update params when model changes
     useEffect(() => {
@@ -190,16 +190,26 @@ export const useAIModels = (initialModel = null, textPrompt) => {
                 if (config.project_ids) {
                     formData.append('project_ids', config.project_ids);
                 } else if (config.project_id) {
-                    // Fallback for symmetry, but likely unused now
                     formData.append('project_id', config.project_id);
                 }
 
-                await axios.post(`${API_URL}/train-model`, formData, {
+                const res = await axios.post(`${API_URL}/train-model`, formData, {
                     headers: { 'Content-Type': 'multipart/form-data' }
                 });
 
-                setTrainingStatus(prev => ({ ...prev, isTraining: true }));
-                return { success: true };
+                if (res.data.task_id) {
+                    setTaskId(res.data.task_id);
+                    setTrainingStatus(prev => ({
+                        ...prev,
+                        isTraining: true,
+                        message: 'Initializing...',
+                        progress: 0.0
+                    }));
+                    return { success: true, task_id: res.data.task_id };
+                }
+
+                return { success: false, error: "No task_id returned" };
+
             } catch (err) {
                 console.error("Training failed:", err);
                 return {
@@ -209,13 +219,11 @@ export const useAIModels = (initialModel = null, textPrompt) => {
             }
         },
         cancelTraining: async () => {
-            try {
-                await axios.post(`${API_URL}/cancel-training`);
-                return { success: true };
-            } catch (err) {
-                console.error("Cancel failed:", err);
-                return { success: false, error: err.message };
-            }
+            // Note: In a real system, we should send a cancel request for the specific task ID
+            // For now, we just reset the frontend state
+            setTaskId(null);
+            setTrainingStatus({ isTraining: false, progress: 0, message: 'Cancelled' });
+            return { success: true };
         }
     };
 
@@ -234,9 +242,7 @@ export const useAIModels = (initialModel = null, textPrompt) => {
         loadingModelIds, // Track async ops
         isTraining: trainingStatus.isTraining,
         trainingProgress: trainingStatus.progress,
-        trainingMessage: trainingStatus.isTraining
-            ? `Epoch ${trainingStatus.epoch}/${trainingStatus.totalEpochs} | Loss: ${trainingStatus.loss?.toFixed(4) || '...'}`
-            : 'Idle'
+        trainingMessage: trainingStatus.message || 'Idle'
     };
 };
 

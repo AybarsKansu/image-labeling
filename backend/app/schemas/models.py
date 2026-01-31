@@ -23,7 +23,7 @@ class ModelFamily(str, Enum):
     YOLO = "yolo"
     SAM = "sam"
 
-
+# TODO modellerin type'ı yerine detaylı kullanım rehberi gelebilir.
 class ModelInfo(BaseModel):
     """Complete information about a model from the registry."""
     id: str = Field(..., description="Model filename (e.g., 'yolov8n.pt')")

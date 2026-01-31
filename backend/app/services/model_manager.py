@@ -5,6 +5,19 @@ Handles loading, caching, lazy initialization, downloads, and cleanup.
 Uses models.yaml as the source of truth for available models.
 """
 
+"""
+Bir modelin olabileceği 4 durum var:
+models.yaml'da yazılı ama indirilmemiş --> _registerde mevcut fakat dosyası yok ve _model içinde değil. download edilmesi lazım
+indirili ama ramde değil --> modelin fiziksel dosyası mevcut fakat gpu'ya yüklenmemiş. birisinin get_model() demesi lazım.
+aktif durum --> ekran kartına yüklenmiş kullanıma hazır. yani _models içinde var.
+custom models --> models.yaml'da yok ama fiziksel olarak dosyası var. 
+
+self._registry: Hangi modellerin var olabileceğini bilir.
+self._models: Hangi modellerin şu an ekran kartında/işlemcide olduğunu bilir.
+Path.exists(): Modelin kalıcı olup olmadığını kontrol eder.
+is_downloaded: ModelInfo şeması üzerinden frontend'e modelin statüsünü raporlayan bayraktır (flag).
+"""
+
 import os
 import glob
 import yaml
@@ -35,6 +48,7 @@ class ModelManager:
     
     _instance: Optional["ModelManager"] = None
     _models: Dict[str, Any] = {}
+    _discovered_models: Dict[str, str] = {}  # name -> filepath (for lazy loading)
     _registry: Dict[str, dict] = {}  # Model registry from YAML
     _device: str = "cuda"
     _models_dir: Path = None
@@ -43,6 +57,7 @@ class ModelManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._models = {}
+            cls._instance._discovered_models = {}
             cls._instance._registry = {}
             cls._instance._device = device
             cls._instance._load_registry()
@@ -64,6 +79,7 @@ class ModelManager:
         self._models_dir = Path(__file__).resolve().parent.parent.parent / "models"
         self._models_dir.mkdir(exist_ok=True)
         
+        # if models.yaml not found:
         if not registry_path.exists():
             print(f"Warning: Model registry not found at {registry_path}")
             return
@@ -85,7 +101,7 @@ class ModelManager:
             
         except Exception as e:
             print(f"Error loading model registry: {e}")
-    
+
     @property
     def device(self) -> str:
         return self._device
@@ -98,6 +114,7 @@ class ModelManager:
     def models_dir(self) -> Path:
         return self._models_dir
     
+    # custom trained ve hazır modelleri döner
     def get_available_models(self) -> List[ModelInfo]:
         """
         Returns list of all models from registry with download status.
@@ -129,7 +146,10 @@ class ModelManager:
             result.append(model_info)
         
         # 2. Add Discovered Models (Not in Registry)
-        for model_id in self._models.keys():
+        # Look at both loaded models AND discovered-but-not-loaded models
+        all_discovered = set(self._models.keys()) | set(self._discovered_models.keys())
+        
+        for model_id in all_discovered:
             if model_id not in registry_ids:
                 # This is a discovered model (e.g. user-trained)
                 # Need to determine type/family best-effort
@@ -154,6 +174,7 @@ class ModelManager:
         
         return result
     
+    # dışarıdan yüklenilen veya custom train edilen modelleri bulmak için
     def scan_models(self, search_paths: list[str] = None) -> list[str]:
         """
         Scans for .pt model files and loads them.
@@ -183,13 +204,19 @@ class ModelManager:
         
         print(f"Discovered local files: {list(local_files)}")
         
-        # Load discovered files
+        # Register discovered files WITHOUT loading them
         for fp in local_files:
             name = os.path.basename(fp)
-            self._load_and_register(name, fp)
+            self._register_only(name, fp)
         
-        return list(self._models.keys())
+        return list(self._discovered_models.keys())
     
+    def _register_only(self, name: str, path: str):
+        """Register a model path for lazy loading later."""
+        if name not in self._registry:
+            self._discovered_models[name] = path
+    
+    # bulunan model _models'te yok ise onu models'e ekler.
     def _load_and_register(self, name: str, path: str) -> bool:
         """
         Internal method to load and register a model.
@@ -227,6 +254,7 @@ class ModelManager:
         name_lower = name.lower()
         return "sam" in name_lower and "yolo" not in name_lower
     
+    # belirtilen modeli bulmaya çalışır. Bulamazsa fallback mekanizması çalışır. O da olmazsa boş döner
     def get_model(self, model_name: str = None) -> Optional[Any]:
         """
         Gets a model by name, lazy-loading if necessary.
@@ -244,12 +272,20 @@ class ModelManager:
         if model_name in self._models:
             return self._models[model_name]
         
-        # 2. Try lazy load from disk (check models_dir)
+        # 2. Try lazy load from disk
+        # Check standard models dir
         model_path = self._models_dir / model_name
         if model_path.exists():
-            print(f"Lazy loading {model_name}...")
+            print(f"Lazy loading {model_name} from models dir...")
             if self._load_and_register(model_name, str(model_path)):
                 return self._models.get(model_name)
+        
+        # Check discovered models path
+        if model_name in self._discovered_models:
+             path = self._discovered_models[model_name]
+             print(f"Lazy loading discovered model {model_name}...")
+             if self._load_and_register(model_name, path):
+                 return self._models.get(model_name)
         
         # 3. Fallback to any available YOLO model
         if self._models:
@@ -308,6 +344,8 @@ class ModelManager:
             print(f"Download failed: {e}")
             return False, f"Failed to download model: {str(e)}"
     
+
+    # rami şişirmeden chunklar halinde indirir.
     def _download_file(self, url: str, dest: Path) -> bool:
         """
         Download a file from URL to destination path.
@@ -320,14 +358,16 @@ class ModelManager:
             True if successful
         """
         try:
+            # standart httpx.get yerine rami şişirmeden. stream sunucuya kapı açar. timeout dosya inme süresini belirler. 
             with httpx.stream("GET", url, follow_redirects=True, timeout=300) as response:
                 response.raise_for_status()
                 
+                # toplam kaç byte bilgisini alır
                 total = int(response.headers.get("content-length", 0))
                 downloaded = 0
                 
                 with open(dest, "wb") as f:
-                    for chunk in response.iter_bytes(chunk_size=8192):
+                    for chunk in response.iter_bytes(chunk_size=8192 * 2 * 2 * 2):
                         f.write(chunk)
                         downloaded += len(chunk)
                         
@@ -389,6 +429,7 @@ class ModelManager:
         return self._registry
 
 
+# birden fazla çağrıya tek instance üzerinden cevap vermeyi sağlar.
 @lru_cache
 def get_model_manager():
     """FastAPI dependency for ModelManager singleton."""

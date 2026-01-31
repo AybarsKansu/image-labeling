@@ -602,7 +602,8 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
                 formData.append('model_name', selectedModel);
                 // Dynamic Params
                 formData.append('confidence', currentParams?.conf ?? 0.25);
-                formData.append('iou', currentParams?.iou ?? 0.45);
+                // Backend expects 'nms_threshold', frontend config uses 'iou'
+                formData.append('nms_threshold', currentParams?.iou ?? 0.45);
 
                 if (currentParams?.retina_masks) {
                     formData.append('retina_masks', true);
@@ -612,8 +613,12 @@ export const useDrawTools = (stageHook, annotationsHook, textPrompt, selectedMod
                     formData.append('max_det', currentParams.max_det);
                 }
 
-                if (currentParams?.enable_tiling !== undefined) {
-                    formData.append('enable_tiling', currentParams.enable_tiling);
+                const enableTiling = currentParams?.enable_tiling ?? false;
+                formData.append('enable_tiling', enableTiling);
+
+                if (enableTiling) {
+                    formData.append('tile_size', currentParams?.tile_size ?? 640);
+                    formData.append('tile_overlap', currentParams?.tile_overlap ?? 0.25);
                 }
             }
 

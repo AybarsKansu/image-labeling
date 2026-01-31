@@ -62,7 +62,7 @@ class InferenceService:
 
         # --- PATH A: Standard Inference (No Tiling) ---
         if not enable_tiling:
-            print(f"Running standard inference on full image ({img_w}x{img_h})...")
+            print(f" Running standard inference on full image({img_w}x{img_h})...")
             results = model(
                 img,
                 retina_masks=True,
@@ -109,7 +109,7 @@ class InferenceService:
         if not all_detections:
             return []
         
-        # Prepare for NMS
+        # Prepare for NMS --> aynı nesneyi birden çok tileda görme durumu için
         # Convert Detection objects back to box format for safe_nms
         # We need to compute bounding boxes from the polygons/points
         nms_boxes = []
