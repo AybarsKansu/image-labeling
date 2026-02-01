@@ -460,11 +460,12 @@ const FileExplorer = ({
                                             <div className="flex items-center justify-center h-full">
                                                 <Monitor className="w-5 h-5 text-purple-500" />
                                             </div>
-                                        ) : file.thumbnail ? (
+                                        ) : (file.thumbnail || file.backend_url) ? (
                                             <img
-                                                src={file.thumbnail}
+                                                src={file.thumbnail || file.backend_url}
                                                 alt=""
                                                 className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+                                                loading="lazy"
                                             />
                                         ) : (
                                             <div className="flex items-center justify-center h-full">

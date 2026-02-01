@@ -25,6 +25,8 @@ import httpx
 from pathlib import Path
 from typing import Dict, Optional, Any, List
 from functools import lru_cache
+import time
+import torch
 
 from ultralytics import YOLO
 
@@ -51,7 +53,8 @@ class ModelManager:
     _discovered_models: Dict[str, str] = {}  # name -> filepath (for lazy loading)
     _registry: Dict[str, dict] = {}  # Model registry from YAML
     _device: str = "cuda"
-    _models_dir: Path = None
+    MAX_LOADED_MODELS: int = 3
+    _model_access_times: Dict[str, float] = {}
     
     def __new__(cls, device: str = "cuda") -> "ModelManager":
         if cls._instance is None:
@@ -59,6 +62,7 @@ class ModelManager:
             cls._instance._models = {}
             cls._instance._discovered_models = {}
             cls._instance._registry = {}
+            cls._instance._model_access_times = {}
             cls._instance._device = device
             cls._instance._load_registry()
         return cls._instance
@@ -253,6 +257,35 @@ class ModelManager:
         """Check if model name indicates a SAM model."""
         name_lower = name.lower()
         return "sam" in name_lower and "yolo" not in name_lower
+
+    def _update_access_time(self, model_name: str) -> None:
+        """Update the last accessed time for a model."""
+        self._model_access_times[model_name] = time.time()
+
+    def _enforce_memory_limit(self) -> None:
+        """
+        Unload least recently used models if limit is reached.
+        """
+        if len(self._models) >= self.MAX_LOADED_MODELS:
+            # Find LRU model
+            # Filter out models that are not in _model_access_times (e.g., just loaded)
+            loaded_and_tracked_models = {k: v for k, v in self._models.items() if k in self._model_access_times}
+            
+            if not loaded_and_tracked_models: # If no models are tracked, or no models are loaded
+                return
+
+            lru_model_name = min(loaded_and_tracked_models.keys(), key=lambda k: self._model_access_times.get(k, 0))
+            
+            print(f"[VRAM Manager] Unloading {lru_model_name} to free memory (Limit: {self.MAX_LOADED_MODELS})")
+            
+            # Delete from memory
+            del self._models[lru_model_name]
+            if lru_model_name in self._model_access_times:
+                del self._model_access_times[lru_model_name]
+                
+            # Clear CUDA cache if possible
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
     
     # belirtilen modeli bulmaya çalışır. Bulamazsa fallback mekanizması çalışır. O da olmazsa boş döner
     def get_model(self, model_name: str = None) -> Optional[Any]:
@@ -268,10 +301,16 @@ class ModelManager:
         if not model_name:
             model_name = "yolo26x-seg.pt"
         
+        # Update access time for LRU
+        self._update_access_time(model_name)
+        
         # 1. Try exact match in cache
         if model_name in self._models:
             return self._models[model_name]
         
+        # Enforce limit BEFORE loading new model
+        self._enforce_memory_limit()
+
         # 2. Try lazy load from disk
         # Check standard models dir
         model_path = self._models_dir / model_name
@@ -326,6 +365,8 @@ class ModelManager:
         if dest_path.exists():
             # Load it if not already loaded
             if model_id not in self._models:
+                self._update_access_time(model_id) # Update access time
+                self._enforce_memory_limit()
                 self._load_and_register(model_id, str(dest_path))
             return True, f"Model '{model_id}' already exists."
         
@@ -335,6 +376,8 @@ class ModelManager:
             success = self._download_file(url, dest_path)
             if success:
                 # Load the newly downloaded model
+                self._update_access_time(model_id) # Update access time
+                self._enforce_memory_limit()
                 self._load_and_register(model_id, str(dest_path))
                 return True, f"Successfully downloaded {model_id}"
             else:
@@ -408,6 +451,10 @@ class ModelManager:
             model_path.unlink()
             if model_name in self._models:
                 del self._models[model_name]
+            if model_name in self._model_access_times:
+                del self._model_access_times[model_name]
+            if model_name in self._discovered_models:
+                del self._discovered_models[model_name]
             return True, f"Deleted {model_name}"
         
         return False, "File not found"

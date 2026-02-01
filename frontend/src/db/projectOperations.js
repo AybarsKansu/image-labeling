@@ -1,9 +1,53 @@
-
+import axios from 'axios';
+import { API_URL } from '../constants/config';
 import db, { FileStatus } from './index';
 
 /**
  * Projects Operations
  */
+
+// Sync projects from backend disk to local Dexie
+export async function syncBackendProjects() {
+    try {
+        // 1. Tell backend to scan its storage folder
+        await axios.post(`${API_URL}/projects/sync-disk`);
+
+        // 2. Fetch the list of projects the backend now knows about
+        const response = await axios.get(`${API_URL}/projects`);
+        const backendProjects = response.data;
+
+        if (!Array.isArray(backendProjects)) return { success: false, error: 'Invalid response from server' };
+
+        let addedCount = 0;
+
+        // 3. For each backend project, ensure it exists in our local Dexie
+        for (const bp of backendProjects) {
+            const local = await db.projects.get(bp.id);
+            if (!local) {
+                await db.projects.add({
+                    id: bp.id,
+                    name: bp.name,
+                    description: bp.description || '',
+                    created_at: bp.created_at,
+                    updated_at: bp.created_at,
+                    thumbnail: null,
+                    file_count: bp.file_count || 0
+                });
+                addedCount++;
+            } else {
+                // Optionally update stats if it already exists
+                await db.projects.update(bp.id, {
+                    file_count: bp.file_count || local.file_count
+                });
+            }
+        }
+
+        return { success: true, added: addedCount };
+    } catch (err) {
+        console.error("Failed to sync backend projects:", err);
+        return { success: false, error: err.message };
+    }
+}
 
 // Create a new project with optional name (auto-generates if not provided)
 export async function createProject(name) {

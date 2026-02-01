@@ -82,60 +82,35 @@ class DatasetService:
                 except: pass
         
         # 1. Save Original
-        self._save_pair("", img, annotations, name_base, ext, images_dir, labels_dir, base_dir)
+        self._save_toon_pair_from_anns("", img, annotations, name_base, ext, images_dir, labels_dir)
         
         if augment_types and len(augment_types) > 0:
             img_h, img_w = img.shape[:2]
             
-            # --- Geometric Augmentations ---
-            
-            if "hflip" in augment_types:
-                img_hflip = cv2.flip(img, 1)
-                anns_hflip = self._transform_annotations(annotations, img_w, img_h, "hflip")
-                self._save_pair("_hflip", img_hflip, anns_hflip, name_base, ext, images_dir, labels_dir, base_dir)
-            
-            if "vflip" in augment_types:
-                img_vflip = cv2.flip(img, 0)
-                anns_vflip = self._transform_annotations(annotations, img_w, img_h, "vflip")
-                self._save_pair("_vflip", img_vflip, anns_vflip, name_base, ext, images_dir, labels_dir, base_dir)
+            # Helper to augment and save
+            def apply_aug(suffix, aug_img, mode=None):
+                 # Transform annotations for this augmentation
+                 aug_anns = self._transform_annotations(annotations, img_w, img_h, mode) if mode else annotations
+                 self._save_toon_pair_from_anns(suffix, aug_img, aug_anns, name_base, ext, images_dir, labels_dir)
+
+            if "hflip" in augment_types: apply_aug("_hflip", cv2.flip(img, 1), "hflip")
+            if "vflip" in augment_types: apply_aug("_vflip", cv2.flip(img, 0), "vflip")
             
             if "rotate" in augment_types:
-                # Rotation 90 degrees clockwise
-                img_r90 = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
-                anns_r90 = self._transform_annotations(annotations, img_w, img_h, "r90")
-                self._save_pair("_r90", img_r90, anns_r90, name_base, ext, images_dir, labels_dir, base_dir)
-                
-                # Rotation 180 degrees
-                img_r180 = cv2.rotate(img, cv2.ROTATE_180)
-                anns_r180 = self._transform_annotations(annotations, img_w, img_h, "r180")
-                self._save_pair("_r180", img_r180, anns_r180, name_base, ext, images_dir, labels_dir, base_dir)
-                
-                # Rotation 270 degrees clockwise (90 counter-clockwise)
-                img_r270 = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-                anns_r270 = self._transform_annotations(annotations, img_w, img_h, "r270")
-                self._save_pair("_r270", img_r270, anns_r270, name_base, ext, images_dir, labels_dir, base_dir)
-            
-            # --- Pixel Augmentations ---
+                apply_aug("_r90", cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE), "r90")
+                apply_aug("_r180", cv2.rotate(img, cv2.ROTATE_180), "r180")
+                apply_aug("_r270", cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE), "r270")
             
             if "brightness" in augment_types:
-                # Brightness increase
-                img_bright = cv2.convertScaleAbs(img, alpha=1.2, beta=30)
-                self._save_pair("_bright", img_bright, annotations, name_base, ext, images_dir, labels_dir, base_dir)
-                
-                # Brightness decrease
-                img_dark = cv2.convertScaleAbs(img, alpha=0.8, beta=-30)
-                self._save_pair("_dark", img_dark, annotations, name_base, ext, images_dir, labels_dir, base_dir)
+                apply_aug("_bright", cv2.convertScaleAbs(img, alpha=1.2, beta=30))
+                apply_aug("_dark", cv2.convertScaleAbs(img, alpha=0.8, beta=-30))
             
             if "blur" in augment_types:
-                # Gaussian blur
-                img_blur = cv2.GaussianBlur(img, (5, 5), 0)
-                self._save_pair("_blur", img_blur, annotations, name_base, ext, images_dir, labels_dir, base_dir)
+                apply_aug("_blur", cv2.GaussianBlur(img, (5, 5), 0))
             
             if "noise" in augment_types:
-                # Gaussian noise
                 noise = np.random.normal(0, 15, img.shape)
-                img_noise = np.clip(img + noise, 0, 255).astype(np.uint8)
-                self._save_pair("_noise", img_noise, annotations, name_base, ext, images_dir, labels_dir, base_dir)
+                apply_aug("_noise", np.clip(img + noise, 0, 255).astype(np.uint8))
         
         return name_base
 
@@ -256,6 +231,50 @@ class DatasetService:
             
         return base_name
 
+    def _save_toon_pair_from_anns(self, suffix, img, annotations, name_base, ext, images_dir, labels_dir):
+        """Constructs TOON data from annotations and saves pair."""
+        fname = f"{name_base}{suffix}{ext}"
+        h, w = img.shape[:2]
+        
+        # 1. Build Class Map & Data
+        # We need the global class map to assign valid IDs, but TOON format just uses IDs.
+        # Assuming frontend sent valid labels or we map them.
+        # For simplicity, we just use the class map from disk or create logic
+        
+        # NOTE: To ensure consistency, we should ensure classes exist in classes.txt
+        # But for strictly saving JSON, we can just save what we have if we want.
+        # However, to be useful, let's map text labels to IDs if possible.
+        
+        base_dir = self._settings.DATASET_DIR # Or project root? Not easily avail here without passing.
+        # Rely on frontend passing IDs? Usually frontend passes "label": "bird"
+        # Let's map dynamically
+        
+        root_dir = labels_dir.parent.parent # raw_data/labels -> raw_data -> root
+        if "raw_data" not in str(root_dir): # fallback
+             root_dir = self._settings.DATASET_DIR
+             
+        class_map = self._load_class_map(root_dir)
+        
+        toon_data_list = []
+        for ann in annotations:
+            label = ann.get("label", "unknown")
+            points = ann.get("points", [])
+            
+            if label not in class_map:
+                class_map[label] = len(class_map)
+                self._append_class(label, root_dir)
+                
+            cls_id = class_map[label]
+            toon_data_list.append([cls_id, points])
+            
+        toon_struct = {
+            "m": [fname, w, h],
+            "d": toon_data_list
+        }
+        
+        self._save_toon_pair(suffix, img, toon_struct, name_base, ext, images_dir, labels_dir)
+
+
     def _save_toon_pair(self, suffix, img, toon_data, base_name, ext, images_dir: Path, labels_dir: Path):
         """Helper to save image and .toon file."""
         # Save Image
@@ -278,52 +297,40 @@ class DatasetService:
         with open(lbl_path, "w") as f:
             json.dump(final_toon, f)
 
-    def _save_pair(
-        self,
-        suffix: str,
-        img: np.ndarray,
-        annotations: List[Dict[str, Any]],
-        name_base: str,
-        ext: str,
-        images_dir: Path,
-        labels_dir: Path,
-        base_dir: Path
-    ):
-        """Save an image/label pair."""
-        fname = f"{name_base}{suffix}{ext}"
-        img_path = images_dir / fname
-        cv2.imwrite(str(img_path), img)
-        
-        # Get/update class mapping
-        class_map = self._load_class_map(base_dir)
-        
-        # Generate YOLO format labels
-        h, w = img.shape[:2]
-        lines = []
-        
-        for ann in annotations:
-            label = ann.get("label", "unknown").strip()
-            points = ann.get("points", [])
+    
+    def _read_toon_labels(self, json_path: Path) -> List[tuple]:
+        """Read TOON format labels and convert to normalized YOLO polys."""
+        polygons = []
+        try:
+            with open(json_path, "r") as f:
+                data = json.load(f)
             
-            if label not in class_map:
-                class_map[label] = len(class_map)
-                self._append_class(label, base_dir)
+            meta = data.get("m", [])
+            if len(meta) < 3: return []
+            w, h = meta[1], meta[2] # Image dims
             
-            cls_id = class_map[label]
+            items = data.get("d", [])
+            for item in items:
+                # item is [cls_id, [x1, y1, x2, y2...]]
+                if len(item) < 2: continue
+                cls_id = item[0]
+                points = item[1]
+                
+                # Normalize
+                norm_pts = []
+                for i in range(0, len(points), 2):
+                    nx = points[i] / w
+                    ny = points[i+1] / h
+                    norm_pts.append(max(0, min(1, nx)))
+                    norm_pts.append(max(0, min(1, ny)))
+                
+                polygons.append((cls_id, norm_pts))
+                
+        except Exception as e:
+            print(f"Error reading TOON {json_path}: {e}")
             
-            # Normalize points
-            norm_pts = []
-            for i in range(0, len(points), 2):
-                nx = max(0, min(1, points[i] / w))
-                ny = max(0, min(1, points[i+1] / h))
-                norm_pts.append(f"{nx:.6f}")
-                norm_pts.append(f"{ny:.6f}")
-            
-            lines.append(f"{cls_id} " + " ".join(norm_pts))
-        
-        lbl_path = labels_dir / f"{name_base}{suffix}.txt"
-        with open(lbl_path, "w") as f:
-            f.write("\n".join(lines))
+        return polygons
+
     
     def _load_class_map(self, base_dir: Path) -> Dict[str, int]:
         """Load class name to ID mapping from classes.txt."""
@@ -416,8 +423,23 @@ class DatasetService:
         return True
     
     def _read_labels(self, label_path: Path) -> List[tuple]:
-        """Read YOLO format labels from file."""
+        """Read labels from file (trying TXT first, then JSON)."""
         polygons = []
+        
+        # Priority 1: JSON (TOON) - Richer data
+        json_path = label_path.with_suffix(".json") # or .toon
+        # Support both .json and .toon? User code uses .toon in save_entry helper but .json logic elsewhere
+        # Let's check both
+        toon_path = label_path.with_suffix(".toon")
+        
+        target_json = None
+        if json_path.exists(): target_json = json_path
+        elif toon_path.exists(): target_json = toon_path
+            
+        if target_json:
+            return self._read_toon_labels(target_json)
+
+        # Priority 2: TXT (Legacy YOLO)
         if label_path.exists():
             with open(label_path, "r") as f:
                 for line in f:
@@ -426,6 +448,7 @@ class DatasetService:
                         cls_id = int(parts[0])
                         coords = [float(x) for x in parts[1:]]
                         polygons.append((cls_id, coords))
+                        
         return polygons
     
     def _process_simple(
@@ -654,6 +677,7 @@ class DatasetService:
         # Step 3: Copy & remap labels from all projects
         all_image_pairs = []  # [(img_path, lbl_path), ...]
         
+
         for pid in project_ids:
             src_dirs = self._project_service.ensure_project_structure(pid)
             src_img_dir = src_dirs["raw_images"]
@@ -672,22 +696,41 @@ class DatasetService:
                 # Copy/symlink image
                 shutil.copy(img_path, dst_img)
                 
-                # Read, remap, and write label
-                src_lbl = src_lbl_dir / f"{img_path.stem}.txt"
-                if src_lbl.exists():
-                    remapped_lines = []
-                    with open(src_lbl, "r") as f:
+                # READ SOURCE LABEL (TXT or JSON) -> WRITE TARGET YOLO TXT
+                base_lbl_name = img_path.stem
+                
+                # Try finding source label
+                labels = []
+                json_src = src_lbl_dir / f"{base_lbl_name}.json"
+                toon_src = src_lbl_dir / f"{base_lbl_name}.toon"
+                txt_src = src_lbl_dir / f"{base_lbl_name}.txt"
+                
+                if json_src.exists():
+                     labels = self._read_toon_labels(json_src)
+                elif toon_src.exists():
+                     labels = self._read_toon_labels(toon_src)
+                elif txt_src.exists():
+                     # Read legacy txt
+                     with open(txt_src, "r") as f:
                         for line in f:
                             parts = line.strip().split()
                             if len(parts) > 1:
-                                old_cls = int(parts[0])
-                                new_cls = remap.get(old_cls, old_cls)
-                                remapped_lines.append(f"{new_cls} " + " ".join(parts[1:]))
+                                labels.append((int(parts[0]), [float(x) for x in parts[1:]]))
+                
+                # Write Remapped TXT
+                if labels:
+                    lines = []
+                    for cls_id, coords in labels:
+                        new_cls = remap.get(cls_id, cls_id)
+                        # coords are already normalized 0-1 from readers
+                        coord_str = " ".join([f"{x:.6f}" for x in coords])
+                        lines.append(f"{new_cls} {coord_str}")
                     
                     with open(dst_lbl, "w") as f:
-                        f.write("\n".join(remapped_lines))
+                        f.write("\n".join(lines))
                     
                     all_image_pairs.append((dst_img, dst_lbl))
+
         
         # Step 4: Preprocess (Tiling/Resize) if needed
         self._preprocess_directory(

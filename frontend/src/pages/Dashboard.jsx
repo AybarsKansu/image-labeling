@@ -2,8 +2,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Plus, Play, Cpu, Folder, Clock, Trash2, Download } from 'lucide-react';
-import { createProject, getRecentProjects, deleteProject } from '../db/projectOperations';
+import { Plus, Play, Cpu, Folder, Clock, Trash2, Download, RefreshCcw, Check } from 'lucide-react';
+import { createProject, getRecentProjects, deleteProject, syncBackendProjects } from '../db/projectOperations';
 import { exportProjectAsZip } from '../utils/projectExport';
 import ParticleNetwork from '../components/Effects/ParticleNetwork';
 import GlassConfirmModal from '../components/UI/GlassConfirmModal';
@@ -12,7 +12,23 @@ const Dashboard = () => {
     const navigate = useNavigate();
     const recentProjects = useLiveQuery(() => getRecentProjects());
     const [isExporting, setIsExporting] = useState(null);
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [syncResult, setSyncResult] = useState(null);
     const [deleteModal, setDeleteModal] = useState({ isOpen: false, projectId: null });
+
+    const handleSyncProjects = async () => {
+        if (isSyncing) return;
+        setIsSyncing(true);
+        setSyncResult(null);
+        const result = await syncBackendProjects();
+        setIsSyncing(false);
+        if (result.success) {
+            setSyncResult(result.added);
+            setTimeout(() => setSyncResult(null), 3000);
+        } else {
+            alert("Sync failed: " + result.error);
+        }
+    };
 
     const handleNewProject = async () => {
         try {
@@ -94,6 +110,22 @@ const Dashboard = () => {
                     >
                         <Plus size={18} />
                         <span>New Project</span>
+                    </button>
+
+                    <button
+                        onClick={handleSyncProjects}
+                        disabled={isSyncing}
+                        className="btn-glass"
+                        title="Disk üzerindeki projeleri tara ve senkronize et"
+                    >
+                        {isSyncing ? (
+                            <RefreshCcw size={18} className="animate-spin" />
+                        ) : syncResult !== null ? (
+                            <Check size={18} className="text-green-400" />
+                        ) : (
+                            <RefreshCcw size={18} />
+                        )}
+                        <span>{isSyncing ? 'Syncing...' : syncResult !== null ? `Added ${syncResult}` : 'Sync Projects'}</span>
                     </button>
 
                     <button

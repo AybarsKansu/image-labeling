@@ -51,7 +51,6 @@ class ProjectService:
         Scans disk for projects not in DB and registers them.
         Returns number of new projects found.
         """
-        print("Syncing projects from disk...")
         disk_projects = [d for d in self._projects_root.iterdir() if d.is_dir()]
         count = 0
         
@@ -116,9 +115,12 @@ class ProjectService:
         new_images = []
         for fname in disk_files:
             if fname not in existing_files:
-                # Check if labeled
-                label_path = Path(project.path) / "raw_data" / "labels" / (Path(fname).stem + ".txt")
-                is_labeled = label_path.exists()
+                # Check if labeled (TXT or JSON)
+                label_txt = Path(project.path) / "raw_data" / "labels" / (Path(fname).stem + ".txt")
+                label_json = Path(project.path) / "raw_data" / "labels" / (Path(fname).stem + ".json")
+                label_toon = Path(project.path) / "raw_data" / "labels" / (Path(fname).stem + ".toon")
+                
+                is_labeled = label_txt.exists() or label_json.exists() or label_toon.exists()
                 
                 new_images.append(Image(
                     project_id=project.id,
@@ -157,9 +159,6 @@ class ProjectService:
 
     def list_projects(self) -> List[Dict[str, Any]]:
         """Returns list of projects with stats."""
-        # Sync first (optional, maybe make this async or manual triggered)
-        self.sync_projects_from_disk()
-        
         projects = self.db.query(Project).all()
         results = []
         

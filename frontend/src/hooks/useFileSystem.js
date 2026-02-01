@@ -713,37 +713,56 @@ export function useFileSystem(projectId = null) {
             const total = projectFiles.length;
             const axios = (await import('axios')).default;
 
+            // Parallel process queue
+            const queue = [];
+            const CONCURRENCY_LIMIT = 5;
+
+            // Prepare all tasks
             for (const file of projectFiles) {
-                console.log(`[SaveDebug] Processing file: ${file.name}`);
                 if (!file.blob || !(file.blob instanceof Blob)) continue;
 
-                const formData = new FormData();
-                formData.append('file', file.blob, file.name);
-                formData.append('image_name', file.name);
+                queue.push(async () => {
+                    try {
+                        console.log(`[SaveDebug] Processing file: ${file.name}`);
+                        const formData = new FormData();
+                        formData.append('file', file.blob, file.name);
+                        formData.append('image_name', file.name);
 
-                if (augParams) {
-                    formData.append('aug_params', JSON.stringify(augParams));
-                }
+                        if (augParams) {
+                            formData.append('aug_params', JSON.stringify(augParams));
+                        }
 
-                let anns = [];
-                if (file.label_data) {
-                    const AnnotationConverter = (await import('../utils/annotationConverter')).AnnotationConverter;
-                    // Use helper we know exists in scope from module logic
-                    const internal = parseLabelData(file.label_data, classNames, file.width, file.height);
-                    if (internal) {
-                        anns = internal.map(a => ({
-                            label: a.label,
-                            points: a.points
-                        }));
+                        let anns = [];
+                        if (file.label_data) {
+                            const AnnotationConverter = (await import('../utils/annotationConverter')).AnnotationConverter;
+                            const internal = parseLabelData(file.label_data, classNames, file.width, file.height);
+                            if (internal) {
+                                anns = internal.map(a => ({
+                                    label: a.label,
+                                    points: a.points
+                                }));
+                            }
+                        }
+                        formData.append('annotations', JSON.stringify(anns));
+
+                        if (!projectId) throw new Error("No project ID available for sync");
+                        await axios.post(`/api/projects/${projectId}/sync`, formData);
+
+                        count++;
+                        setProcessingProgress(prev => ({ ...prev, processed: count }));
+                    } catch (e) {
+                        console.error(`Failed to save ${file.name}:`, e);
+                        // We continue even if one fails
                     }
-                }
-                formData.append('annotations', JSON.stringify(anns));
+                });
+            }
 
-                // Use new Project-based Sync API
-                if (!projectId) throw new Error("No project ID available for sync");
-                await axios.post(`/api/projects/${projectId}/sync`, formData);
-                count++;
-                setProcessingProgress({ processed: count, total, phase: 'saving' });
+            // Execute in batches
+            for (let i = 0; i < queue.length; i += CONCURRENCY_LIMIT) {
+                const batch = queue.slice(i, i + CONCURRENCY_LIMIT);
+                await Promise.all(batch.map(fn => fn()));
+                // Optional: small delay to yield to main thread if needed
+                // await new Promise(r => setTimeout(r, 10));
             }
             setIsProcessing(false);
             return { success: true, count };

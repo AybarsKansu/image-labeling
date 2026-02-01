@@ -16,6 +16,14 @@ async def list_projects(
     """List all available projects."""
     return service.list_projects()
 
+@router.post("/sync-disk")
+async def sync_projects_from_disk(
+    service: ProjectService = Depends(get_project_service)
+):
+    """Manually trigger disk synchronization for projects."""
+    new_count = service.sync_projects_from_disk()
+    return {"status": "success", "new_projects_found": new_count}
+
 @router.delete("/{project_id}")
 async def delete_project(
     project_id: str,
